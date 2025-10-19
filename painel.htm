@@ -1,0 +1,1658 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel da Unidade de Internação</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/pt.js"></script> 
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html, body {
+            height: 100%;
+            overflow: hidden; /* Prevent body scroll */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+        }
+        .sidebar-icon {
+            transition: all 0.2s ease-in-out;
+        }
+        .sidebar-icon:hover {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5);
+            animation: fadeIn 0.3s;
+        }
+        .modal-content {
+            animation: slideIn 0.3s;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideIn { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        .birthday-alert {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+        }
+        .subtle-scrollbar::-webkit-scrollbar { width: 8px; }
+        .subtle-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .subtle-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+        .subtle-scrollbar::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+        
+        .loader-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.7); display: flex;
+            justify-content: center; align-items: center; z-index: 9999;
+            flex-direction: column; gap: 1rem;
+        }
+        .loader {
+            border: 8px solid #f3f3f3; border-radius: 50%;
+            border-top: 8px solid #3498db; width: 60px; height: 60px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="loader" class="loader-overlay">
+        <div class="loader"></div>
+        <p class="text-gray-700 font-semibold" id="loader-text">A carregar dados...</p>
+        <div id="error-container" class="hidden mt-4 text-center">
+            <p class="text-red-600 font-semibold">Ocorreu um erro ao carregar os dados.</p>
+            <p class="text-sm text-gray-600">Por favor, verifique a sua ligação à internet e a consola (F12) para mais detalhes.</p>
+            <a href="#" onclick="app.testConnection()" class="text-blue-500 hover:underline mt-2">Testar Ligação ao Script</a>
+        </div>
+    </div>
+
+    <div id="main-app" class="w-full h-screen flex" style="display: none;">
+        <aside class="w-20 bg-blue-600 text-white p-4 flex flex-col items-center space-y-6">
+            <div class="flex items-center justify-center"> <i data-lucide="hospital" class="w-8 h-8"></i> </div>
+            <nav class="flex flex-col space-y-4">
+                <a href="#" onclick="app.changeView('leitos')" title="Leitos" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="bed-double" class="w-6 h-6"></i> </a>
+                <a href="#" onclick="app.changeView('pacientes')" title="Pacientes" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="users" class="w-6 h-6"></i> </a>
+                <a href="#" onclick="app.changeView('fisioterapia')" title="Fisioterapia" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="heart-pulse" class="w-6 h-6"></i> </a>
+                <a href="#" onclick="app.changeView('reservas')" title="Reservas" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="calendar-plus" class="w-6 h-6"></i> </a>
+                <a href="#" onclick="app.changeView('escalas')" title="Escalas" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="clipboard-list" class="w-6 h-6"></i> </a>
+                <a href="#" onclick="app.changeView('equipe')" title="Equipe" class="sidebar-icon p-3 rounded-lg"> <i data-lucide="shield" class="w-6 h-6"></i> </a>
+            </nav>
+        </aside>
+
+        <main class="flex-1 p-2 flex flex-col h-full">
+            <div id="app-content" class="flex-grow flex flex-col h-0"></div>
+            <footer id="status-footer" class="text-xs text-gray-500 p-1 text-center flex-shrink-0"></footer>
+        </main>
+    </div>
+    
+    <div id="admitirPacienteModal" class="modal justify-center items-center"><div id="admitirPacienteModalContent" class="modal-content bg-white rounded-lg shadow-xl w-full max-w-md p-6"></div></div>
+    <div id="editLeitoModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-md p-6"><h2 class="text-2xl font-bold mb-6">Editar Leito</h2><form id="editLeitoForm"><input type="hidden" id="editLeitoId"><div class="space-y-4"><div><label for="editLeitoStatus" class="block text-sm font-medium text-gray-700 mb-1">Status do Leito</label><select id="editLeitoStatus" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm disabled:bg-gray-100"><option value="Ocupado" disabled>Ocupado</option><option value="Livre">Livre</option><option value="Higienização">Higienização</option><option value="Manutenção">Manutenção</option><option value="Reservado">Reservado</option><option value="Em Exame">Em Exame</option><option value="Em Cirurgia">Em Cirurgia</option><option value="Alta">Alta</option></select><p id="editStatusHelper" class="text-xs text-gray-500 mt-1 hidden"></p></div><div><label for="editLeitoTipoIsolamento" class="block text-sm font-medium text-gray-700 mb-1">Tipo de Isolamento</label><select id="editLeitoTipoIsolamento" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"><option value="Nenhum">Nenhum</option><option value="Geral">Geral</option><option value="Contato">Contato</option><option value="Gotículas">Gotículas</option></select></div><div><label for="editCondicaoPaciente" class="block text-sm font-medium text-gray-700 mb-1">Condição Especial</label><select id="editCondicaoPaciente" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm disabled:bg-gray-100"><option value="Nenhum">Nenhuma</option><option value="Imunossuprimido">Imunossuprimido</option><option value="Externo">Paciente Externo</option></select></div><div><label for="editPacienteDieta" class="block text-sm font-medium text-gray-700 mb-1">Dieta do Paciente</label><select id="editPacienteDieta" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm disabled:bg-gray-100"><option value="NPO">NPO (Nada por via oral)</option><option value="Branda">Branda</option><option value="Pastosa">Pastosa</option><option value="Líquida">Líquida</option><option value="SNE">SNE (Sonda Nasoenteral)</option></select></div><div id="editCareNeeds" class="space-y-2 pt-2" style="display: none;"><label class="block text-sm font-medium text-gray-700">Necessidades de Cuidado</label><div class="flex items-center space-x-4"><div class="flex items-center"><input id="editFisioterapia" type="checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"><label for="editFisioterapia" class="ml-2 block text-sm text-gray-900">Fisioterapia</label></div><div class="flex items-center"><input id="editRiscoNutricional" type="checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"><label for="editRiscoNutricional" class="ml-2 block text-sm text-gray-900">Risco Nutricional</label></div></div></div><div><label for="editLeitoObservacoes" class="block text-sm font-medium text-gray-700 mb-1">Observações</label><textarea id="editLeitoObservacoes" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></textarea></div></div><div class="flex justify-end space-x-3 mt-6"><button type="button" onclick="app.closeModal('editLeitoModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Salvar Alterações</button></div></form></div></div>
+    <div id="addPacienteModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-lg p-6"><h2 id="pacienteModalTitle" class="text-2xl font-bold mb-6">Novo Paciente</h2><form id="addPacienteForm"><input type="hidden" id="pacienteId"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><input type="text" id="pacienteNome" placeholder="Nome Completo" class="md:col-span-2 w-full px-3 py-2 border border-gray-300 rounded-md" required><input type="text" id="pacienteProntuario" placeholder="Nº Prontuário" class="w-full px-3 py-2 border border-gray-300 rounded-md" required><input type="text" id="pacienteSaram" placeholder="SARAM (Convênio)" class="w-full px-3 py-2 border border-gray-300 rounded-md"><div><label for="pacienteNascimento" class="block text-sm font-medium text-gray-700">Data de Nascimento</label><input type="text" id="pacienteNascimento" class="datepicker w-full px-3 py-2 border border-gray-300 rounded-md" required placeholder="DD/MM/AAAA"></div><div><label for="pacienteAdmissao" class="block text-sm font-medium text-gray-700">Data de Admissão</label><input type="text" id="pacienteAdmissao" class="datepicker w-full px-3 py-2 border border-gray-300 rounded-md" required placeholder="DD/MM/AAAA"></div><select id="pacienteSexo" class="w-full px-3 py-2 border border-gray-300 rounded-md" required><option value="">Selecione o Sexo</option><option value="Masculino">Masculino</option><option value="Feminino">Feminino</option></select><select id="pacienteEquipe" class="w-full px-3 py-2 border border-gray-300 rounded-md" required><option value="">Selecione a Equipe</option><option value="Clínica">Clínica</option><option value="Cirúrgica">Cirúrgica</option></select><select id="pacienteDieta" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="NPO">NPO (Nada por via oral)</option><option value="Branda" selected>Branda</option><option value="Pastosa">Pastosa</option><option value="Líquida">Líquida</option><option value="SNE">SNE (Sonda Nasoenteral)</option></select><div class="flex items-center space-x-2"><input type="checkbox" id="pacienteAcompanhante" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"><label for="pacienteAcompanhante" class="text-sm font-medium text-gray-700">Possui acompanhante?</label></div><input type="text" id="pacienteDiagnostico" placeholder="Diagnóstico Principal" class="md:col-span-2 w-full px-3 py-2 border border-gray-300 rounded-md" required><input type="text" id="pacienteAlergias" placeholder="Alergias (separar por vírgula)" class="md:col-span-2 w-full px-3 py-2 border border-gray-300 rounded-md"></div><div class="mt-6 border-t pt-4"><h3 class="text-lg font-medium text-gray-700 mb-2">Escalas de Risco (Iniciais)</h3><div class="grid grid-cols-3 gap-4"><div><label for="pacienteBraden" class="block text-sm font-medium text-gray-600">Braden</label><input type="number" id="pacienteBraden" placeholder="Pontos" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="pacienteMorse" class="block text-sm font-medium text-gray-600">Morse</label><input type="number" id="pacienteMorse" placeholder="Pontos" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="pacienteFugulin" class="block text-sm font-medium text-gray-600">Fugulin</label><input type="number" id="pacienteFugulin" placeholder="Pontos" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div></div></div><div class="flex justify-end space-x-3 mt-6"><button type="button" onclick="app.closeModal('addPacienteModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Salvar Paciente</button></div></form></div></div>
+    <div id="addEditEquipeModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-md p-6"><h2 id="equipeModalTitle" class="text-2xl font-bold mb-6"></h2><form id="addEditEquipeForm"><input type="hidden" id="equipeMembroId"><div class="space-y-4"><div><label for="equipeNome" class="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label><input type="text" id="equipeNome" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="equipeFuncao" class="block text-sm font-medium text-gray-700 mb-1">Função</label><input type="text" id="equipeFuncao" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="equipeTurno" class="block text-sm font-medium text-gray-700 mb-1">Turno</label><select id="equipeTurno" class="w-full px-3 py-2 border border-gray-300 rounded-md" required><option value="Manhã">Manhã</option><option value="Tarde">Tarde</option><option value="Noite A">Noite A</option><option value="Noite B">Noite B</option></select></div><div><label for="equipeNascimento" class="block text-sm font-medium text-gray-700 mb-1">Data de Nascimento</label><input type="text" id="equipeNascimento" class="datepicker w-full px-3 py-2 border border-gray-300 rounded-md" required placeholder="DD/MM/AAAA"></div></div><div class="flex justify-end space-x-3 mt-6"><button type="button" onclick="app.closeModal('addEditEquipeModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Salvar</button></div></form></div></div>
+    <div id="confirmModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-sm p-6 text-center"><div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100"><i data-lucide="alert-triangle" class="h-6 w-6 text-yellow-600"></i></div><h3 class="text-lg leading-6 font-medium text-gray-900 mt-4" id="confirmModalTitle"></h3><div class="mt-2 px-7 py-3"><p class="text-sm text-gray-500" id="confirmModalMessage"></p></div><div class="items-center px-4 py-3 flex justify-center space-x-4"><button id="cancelButton" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 w-24">Cancelar</button><button id="confirmButton" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 w-24">Confirmar</button></div></div></div>
+    <div id="altaModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-sm p-6"><h3 class="text-lg leading-6 font-medium text-gray-900" id="altaModalTitle"></h3><form id="altaForm"><input type="hidden" id="altaLeitoId"><div class="mt-4"><label for="tipoAltaSelect" class="block text-sm font-medium text-gray-700 mb-1">Selecione o motivo da alta:</label><select id="tipoAltaSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"><option value="Alta Melhorado">Alta Melhorado</option><option value="Evasão">Evasão</option><option value="Óbito">Óbito</option></select></div><div class="items-center px-4 py-3 flex justify-center space-x-4 mt-4"><button type="button" onclick="app.closeModal('altaModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 w-24">Cancelar</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 w-24">Confirmar</button></div></form></div></div>
+    <div id="transferirPacienteModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-sm p-6"><h3 class="text-lg leading-6 font-medium text-gray-900" id="transferirModalTitle"></h3><form id="transferirForm"><input type="hidden" id="transferirLeitoIdOrigem"><div class="mt-4"><label for="leitoDestinoSelect" class="block text-sm font-medium text-gray-700 mb-1">Selecione o leito de destino:</label><select id="leitoDestinoSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></select></div><div class="items-center px-4 py-3 flex justify-center space-x-4 mt-4"><button type="button" onclick="app.closeModal('transferirPacienteModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 w-24">Cancelar</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 w-24">Transferir</button></div></form></div></div>
+    <div id="addReservaModal" class="modal justify-center items-center"><div class="modal-content bg-white rounded-lg shadow-xl w-full max-w-md p-6"><h2 class="text-2xl font-bold mb-6">Nova Reserva</h2><form id="addReservaForm"><div class="space-y-4"><div><label for="reservaData" class="block text-sm font-medium text-gray-700 mb-1">Data</label><input type="text" id="reservaData" class="datepicker w-full px-3 py-2 border border-gray-300 rounded-md" required placeholder="DD/MM/AAAA"></div><div><label for="reservaNome" class="block text-sm font-medium text-gray-700 mb-1">Nome do Paciente</label><input type="text" id="reservaNome" class="w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="reservaMotivo" class="block text-sm font-medium text-gray-700 mb-1">Motivo</label><textarea id="reservaMotivo" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></textarea></div></div><div class="flex justify-end space-x-3 mt-6"><button type="button" onclick="app.closeModal('addReservaModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Salvar Reserva</button></div></form></div></div>
+    <div id="lancarEscalasModal" class="modal justify-center items-center"><div id="lancarEscalasModalContent" class="modal-content bg-white rounded-lg shadow-xl w-full max-w-3xl p-6"></div></div>
+    <div id="historicoEscalasModal" class="modal justify-center items-center"><div id="historicoEscalasModalContent" class="modal-content bg-white rounded-lg shadow-xl w-full max-w-3xl p-6"></div></div>
+
+    <script>
+        const app = {
+            appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxJp8-2qRibag95GfPnazUNWC-EdA8VUFYecZHg9Pp1hl5OlR3kofF-HbElRYCGcdv0/exec',
+            data: { leitos: [], pacientes: [], equipe: [], reservas: [], escalas: [] },
+            currentView: 'leitos',
+            patientFilter: { year: new Date().getFullYear(), month: new Date().getMonth() },
+            fisioterapiaFilter: { year: new Date().getFullYear(), month: new Date().getMonth() },
+            renderTimeout: null,
+            saveTimeout: null,
+            isSaving: false,
+            initialDataCounts: null,
+            saveDataToLocalStorage() {
+                try {
+                    const dataString = JSON.stringify(this.data);
+                    localStorage.setItem('hospitalPanelData', dataString);
+                    console.log("Backup local salvo com sucesso.");
+                } catch (error) {
+                    console.error("Não foi possível salvar o backup local:", error);
+                }
+            },
+
+            loadDataFromLocalStorage() {
+                try {
+                    const dataString = localStorage.getItem('hospitalPanelData');
+                    if (dataString) {
+                        this.data = JSON.parse(dataString);
+                        console.log("Dados carregados do backup local.");
+                        return true;
+                    }
+                } catch (error) {
+                    console.error("Não foi possível carregar o backup local:", error);
+                }
+                return false;
+            },
+            
+            showLoader(show, text = 'A carregar dados...') {
+                const loader = document.getElementById('loader');
+                const mainApp = document.getElementById('main-app');
+                const errorContainer = document.getElementById('error-container');
+                loader.querySelector('#loader-text').textContent = text;
+                loader.style.display = show ? 'flex' : 'none';
+                mainApp.style.display = show ? 'none' : 'flex';
+                errorContainer.classList.add('hidden');
+            },
+            
+            showError(message) {
+                const loader = document.getElementById('loader');
+                const loaderText = document.getElementById('loader-text');
+                const errorContainer = document.getElementById('error-container');
+                
+                loader.querySelector('.loader').style.display = 'none';
+                loaderText.textContent = '';
+                errorContainer.classList.remove('hidden');
+                errorContainer.querySelector('p').textContent = message;
+            },
+
+            testConnection() {
+                const testCallback = 'connectionTestCallback';
+                window[testCallback] = (data) => {
+                    if (data && data.status === 'success') {
+                        alert("Ligação bem-sucedida! O script está a responder corretamente. O erro pode estar na leitura dos dados da planilha. Verifique se os nomes das abas e os cabeçalhos estão exatamente como especificado.");
+                    } else if (data && data.error) {
+                        alert(`Erro do Script: ${data.error}`);
+                    }
+                    delete window[testCallback];
+                    document.body.removeChild(script);
+                };
+                const script = document.createElement('script');
+                script.src = `${this.appsScriptUrl}?action=test&callback=${testCallback}`;
+                script.onerror = () => {
+                    alert("Falha na ligação! Não foi possível contactar o URL do Apps Script. Verifique se a URL está correta, se o script foi implantado corretamente com acesso para 'Qualquer pessoa' e se a sua ligação à internet está a funcionar.");
+                    delete window[testCallback];
+                    if (script.parentNode) document.body.removeChild(script);
+                };
+                document.body.appendChild(script);
+            },
+            
+            async startApp() {
+                console.log("1. startApp: Iniciando a aplicação...");
+                this.showLoader(true, 'Carregando dados...');
+                
+                console.log("2. startApp: Tentando carregar dados do backup local (localStorage)...");
+                if (this.loadDataFromLocalStorage()) {
+                    console.log("3. startApp: Backup local encontrado e carregado. Renderizando a tela pela primeira vez.");
+                    this.render();
+                    this.showLoader(false);
+                } else {
+                    console.log("3. startApp: Nenhum backup local encontrado.");
+                }
+                
+                console.log("4. startApp: Tentando buscar dados da nuvem (Google Sheets)...");
+                try {
+                    await this.loadDataFromGoogleSheets();
+                    console.log("8. startApp: Dados da nuvem recebidos com sucesso. Renderizando a tela novamente com dados atualizados.");
+                    this.render();
+                } catch (error) {
+                    console.error("ERRO em startApp: Falha ao buscar dados do Google Sheets.", error);
+                    if (!this.data || this.data.leitos.length === 0) {
+                        this.showError('Não foi possível carregar os dados da nuvem e não há backup local.');
+                    }
+                } finally {
+                    this.showLoader(false);
+                    console.log("9. startApp: Finalizado.");
+                }
+            },
+
+            loadDataFromGoogleSheets() {
+                console.log("5. loadDataFromGoogleSheets: Função chamada.");
+                if (!this.appsScriptUrl || this.appsScriptUrl === 'COLE_A_URL_DO_SEU_APP_DA_WEB_AQUI') {
+                    console.error("ERRO em loadDataFromGoogleSheets: URL do script não configurada.");
+                    this.showError('ERRO: A URL do Google Apps Script não foi configurada.');
+                    return Promise.reject(new Error("URL do Apps Script não configurada."));
+                }
+
+                return new Promise((resolve, reject) => {
+                    const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
+                    console.log(`6. loadDataFromGoogleSheets: Criando script com callback: ${callbackName}`);
+                    
+                    window[callbackName] = (loadedData) => {
+                        console.log("7. loadDataFromGoogleSheets: Callback recebido do Google! Processando dados...");
+                        console.log("Dados recebidos:", loadedData);
+                        
+                        if(loadedData.error) {
+                            console.error("ERRO em loadDataFromGoogleSheets: O script do Google retornou um erro:", loadedData.error);
+                            this.showError(`Erro do Script: ${loadedData.error}`);
+                            reject(new Error(loadedData.error));
+                            return;
+                        }
+
+                        this.data.leitos = loadedData.leitos || [];
+                        this.data.pacientes = loadedData.pacientes || [];
+                        this.data.equipe = loadedData.equipe || [];
+                        this.data.reservas = loadedData.reservas || [];
+                        this.data.escalas = loadedData.escalas || [];
+                        
+                        console.log(`Pacientes carregados: ${this.data.pacientes.length}`);
+                        
+                        this.isDataLoaded = true;
+                        this.initialDataCounts = {
+                            pacientes: this.data.pacientes.length,
+                            leitos: this.data.leitos.length,
+                            equipe: this.data.equipe.length
+                        };
+                        
+                        this.saveDataToLocalStorage();
+                        
+                        delete window[callbackName];
+                        const scriptElement = document.querySelector(`script[src*="${callbackName}"]`);
+                        if(scriptElement) document.body.removeChild(scriptElement);
+                        this.showLoader(false);
+                        resolve();
+                    };
+
+                    const script = document.createElement('script');
+                    script.src = `${this.appsScriptUrl}?callback=${callbackName}`;
+                    
+                    script.onerror = () => {
+                        console.error("ERRO em loadDataFromGoogleSheets: Falha de rede ao carregar o script do Google.");
+                        this.showError("Não foi possível carregar os dados. Verifique a consola (F12) para mais detalhes.");
+                        delete window[callbackName];
+                        if (script.parentNode) {
+                            script.parentNode.removeChild(script);
+                        }
+                        reject(new Error("Erro na requisição JSONP."));
+                    };
+
+                    document.body.appendChild(script);
+                });
+            },
+
+            async saveDataToGoogleSheets() {
+                clearTimeout(this.saveTimeout);
+                this.saveTimeout = setTimeout(() => {
+                    if (!this.isDataLoaded) {
+                        alert("ERRO: Os dados não foram carregados completamente. O salvamento foi bloqueado para evitar perda de dados. Por favor, atualize a página e tente novamente.");
+                        this.showLoader(false);
+                        return;
+                    }
+
+                    if (this.initialDataCounts && this.initialDataCounts.pacientes > 5 && this.data.pacientes.length === 0) {
+                        this.showConfirmModal(
+                            "Atenção! Risco de Perda de Dados",
+                            "Está prestes a apagar todos os registos de pacientes. Tem a certeza que deseja continuar?",
+                            () => { this.performSave(); }
+                        );
+                        return; 
+                    }
+
+                    this.performSave();
+                }, 100);
+            },
+
+            async performSave() {
+                if (this.isSaving) return;
+                this.saveDataToLocalStorage();
+
+                if (!navigator.onLine) {
+                    this.updateStatus('Offline. Alterações salvas localmente. Sincronização pendente.');
+                    localStorage.setItem('hospitalPanel_needsSync', 'true');
+                    console.log("Offline: Salvamento na nuvem adiado. Sincronização necessária.");
+                    return;
+                }
+
+                this.isSaving = true;
+                this.updateStatus('A guardar na nuvem...');
+                
+                const formData = new FormData();
+                formData.append('data', JSON.stringify(this.data));
+
+                try {
+                    await fetch(this.appsScriptUrl, { method: 'POST', body: formData, mode: 'no-cors' });
+                    this.updateStatus('Sincronizado com a nuvem.');
+                    localStorage.removeItem('hospitalPanel_needsSync');
+                    console.log("Online: Dados sincronizados com sucesso.");
+                } catch (error) {
+                    console.error("Erro ao enviar dados, marcando para sincronização futura:", error);
+                    this.updateStatus('Erro ao salvar na nuvem. Sincronização pendente.');
+                    localStorage.setItem('hospitalPanel_needsSync', 'true');
+                } finally {
+                    this.isSaving = false;
+                    this.showLoader(false);
+                }
+            },
+            
+            updateStatus(message) {
+                const footer = document.getElementById('status-footer');
+                if(footer) {
+                    footer.textContent = message;
+                }
+            },
+            
+            requestRender() {
+                if (this.renderTimeout) clearTimeout(this.renderTimeout);
+                this.renderTimeout = setTimeout(() => this.render(), 50); 
+            },
+
+            render() {
+                const viewFunctions = { leitos: this.renderLeitos, pacientes: this.renderPacientes, fisioterapia: this.renderFisioterapia, reservas: this.renderReservas, equipe: this.renderEquipe, escalas: this.renderEscalas };
+                if (viewFunctions[this.currentView]) {
+                    viewFunctions[this.currentView].call(this);
+                }
+                document.querySelectorAll('.sidebar-icon').forEach(icon => {
+                    icon.classList.remove('bg-blue-700');
+                    if (icon.title.toLowerCase().startsWith(this.currentView)) { icon.classList.add('bg-blue-700'); }
+                });
+                lucide.createIcons();
+            },
+            
+            formatDateToBR(dateString) {
+                if (!dateString || typeof dateString !== 'string') return '';
+                const date = new Date(dateString + 'T12:00:00Z');
+                if (isNaN(date.getTime())) return '';
+                return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+            },
+
+            formatDateToISO(brDateString) {
+                if (!brDateString || typeof brDateString !== 'string' || !brDateString.includes('/')) return brDateString;
+                const [day, month, year] = brDateString.split('/');
+                return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            },
+            
+            // INÍCIO: FUNÇÃO GETINITIALS RESTAURADA
+            getInitials(fullName) {
+                if (!fullName || typeof fullName !== 'string' || fullName.trim() === '') return '';
+                const initials = fullName.trim().split(' ').map(name => name.charAt(0)).join('.');
+                return `${initials}.`;
+            },
+            // FIM: FUNÇÃO GETINITIALS RESTAURADA
+            
+            generateNewId(array) {
+                if (!array || array.length === 0) {
+                    return 1;
+                }
+                const maxId = Math.max(...array.map(item => Number(item.id) || 0));
+                return maxId + 1;
+            },
+            
+            _parseISODateAsLocal(isoString) {
+                if (!isoString || typeof isoString !== 'string' || isoString.length < 10) return null;
+                const year = parseInt(isoString.substring(0, 4), 10);
+                const month = parseInt(isoString.substring(5, 7), 10) - 1;
+                const day = parseInt(isoString.substring(8, 10), 10);
+                return new Date(year, month, day, 12, 0, 0); 
+            },
+            
+            calcularIdade(dataNascimento) {
+                if (!dataNascimento) return '';
+                const hoje = new Date();
+                const nascimento = this._parseISODateAsLocal(dataNascimento);
+                if (!nascimento || isNaN(nascimento.getTime())) return '';
+                
+                let idade = hoje.getFullYear() - nascimento.getFullYear();
+                const m = hoje.getMonth() - nascimento.getMonth();
+                if (m < 0 || (m === 0 && hoje.getDate() < nascimento.getDate())) {
+                    idade--;
+                }
+                return `${idade} anos`;
+            },
+
+            getRiskScaleBadgeSimple(scale, score) {
+                let color = '';
+                let label = '';
+                let classification = '';
+                const scoreNum = Number(score) || 0;
+
+                switch(scale) {
+                    case 'braden':
+                        label = 'B';
+                        if (scoreNum <= 12) { color = 'bg-red-500'; classification = 'Braden: Risco Alto'; }
+                        else if (scoreNum <= 18) { color = 'bg-yellow-400 text-black'; classification = 'Braden: Risco Moderado'; }
+                        else { color = 'bg-green-500'; classification = 'Braden: Risco Baixo / Sem Risco'; }
+                        break;
+                    case 'morse':
+                        label = 'M';
+                        if (scoreNum >= 45) { color = 'bg-red-500'; classification = 'Morse: Risco Alto de Queda'; }
+                        else if (scoreNum >= 25) { color = 'bg-yellow-400 text-black'; classification = 'Morse: Risco Baixo de Queda'; }
+                        else { color = 'bg-green-500'; classification = 'Morse: Sem Risco de Queda'; }
+                        break;
+                    case 'fugulin':
+                        label = 'F';
+                        if (scoreNum >= 35) { color = 'bg-red-800'; classification = 'Fugulin: Cuidado de Altíssima Dependência'; }
+                        else if (scoreNum >= 30) { color = 'bg-red-500'; classification = 'Fugulin: Cuidado Intensivo'; }
+                        else if (scoreNum >= 24) { color = 'bg-yellow-400 text-black'; classification = 'Fugulin: Cuidado Semi-Intensivo'; }
+                        else if (scoreNum >= 18) { color = 'bg-cyan-500'; classification = 'Fugulin: Cuidado Intermediário'; }
+                        else { color = 'bg-green-500'; classification = 'Fugulin: Cuidado Mínimo'; }
+                        break;
+                }
+                return `<div title="${classification}" class="flex flex-col items-center justify-center h-12 w-12 text-xs font-bold text-white rounded-lg ${color} p-1">
+                                <span>${label}</span>
+                                <span class="text-base">${scoreNum}</span>
+                            </div>`;
+            },
+            
+            getBirthdayInfo(dateString) {
+                const today = new Date(); today.setHours(0,0,0,0);
+                if (!dateString) return '';
+                const birthDate = this._parseISODateAsLocal(dateString);
+                if (!birthDate || isNaN(birthDate.getTime())) return '';
+                
+                const formattedBirthDate = `${String(birthDate.getDate()).padStart(2, '0')}/${String(birthDate.getMonth() + 1).padStart(2, '0')}`;
+                
+                if(birthDate.getDate() === today.getDate() && birthDate.getMonth() === today.getMonth()) { 
+                    return `<div class="birthday-alert bg-yellow-400 text-yellow-900 font-bold p-1 rounded-lg flex items-center justify-center space-x-1 text-xs"><i data-lucide="cake" class="w-4 h-4"></i> <span>${formattedBirthDate}</span></div>`; 
+                }
+                return `<span class="font-medium text-xs">${formattedBirthDate}</span>`;
+            },
+            
+            getTeamBirthdaysInNext7Days() {
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const sevenDaysFromNow = new Date(); sevenDaysFromNow.setDate(today.getDate() + 7); sevenDaysFromNow.setHours(23, 59, 59, 999);
+                return (this.data.equipe || []).filter(membro => {
+                    if(!membro.dataNascimento) return false;
+                    const birthDate = this._parseISODateAsLocal(membro.dataNascimento);
+                    if(!birthDate || isNaN(birthDate.getTime())) return false;
+                    const birthDateThisYear = new Date(birthDate); birthDateThisYear.setFullYear(today.getFullYear());
+                    const birthDateNextYear = new Date(birthDate); birthDateNextYear.setFullYear(today.getFullYear() + 1);
+                    return (birthDateThisYear >= today && birthDateThisYear <= sevenDaysFromNow) || (birthDateNextYear >= today && birthDateNextYear <= sevenDaysFromNow);
+                });
+            },
+            
+            getPatientBirthdaysInNext7Days() {
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const sevenDaysFromNow = new Date(); sevenDaysFromNow.setDate(today.getDate() + 7); sevenDaysFromNow.setHours(23, 59, 59, 999);
+                return (this.data.pacientes || []).filter(paciente => {
+                    if (!this.data.leitos.some(l => l.pacienteId === paciente.id) || !paciente.dataNascimento) return false;
+                    const birthDate = this._parseISODateAsLocal(paciente.dataNascimento);
+                    if(!birthDate || isNaN(birthDate.getTime())) return false;
+                    const birthDateThisYear = new Date(birthDate); birthDateThisYear.setFullYear(today.getFullYear());
+                    const birthDateNextYear = new Date(birthDate); birthDateNextYear.setFullYear(today.getFullYear() + 1);
+                    return (birthDateThisYear >= today && birthDateThisYear <= sevenDaysFromNow) || (birthDateNextYear >= today && birthDateNextYear <= sevenDaysFromNow);
+                });
+            },
+
+            getSpecialIcons(leito) {
+                let parts = [];
+                const iconMap = {
+                    'Geral': { icon: 'shield-alert', color: 'text-orange-600', title: 'Isolamento Geral' },
+                    'Contato': { icon: 'hand', color: 'text-red-600', title: 'Isolamento por Contato' },
+                    'Gotículas': { icon: 'droplets', color: 'text-blue-600', title: 'Isolamento por Gotículas' },
+                    'Imunossuprimido': { icon: 'shield-off', color: 'text-purple-600', title: 'Paciente Imunossuprimido' },
+                    'Externo': { icon: 'ambulance', color: 'text-gray-600', title: 'Paciente de Outra Instituição' },
+                };
+                if (leito.tipoIsolamento && leito.tipoIsolamento !== 'Nenhum' && iconMap[leito.tipoIsolamento]) { const i = iconMap[leito.tipoIsolamento]; parts.push(`<div class="flex items-center space-x-1 ${i.color}" title="${i.title}"><i data-lucide="${i.icon}" class="w-5 h-5"></i><span class="text-xs font-bold">${leito.tipoIsolamento}</span></div>`); }
+                if (leito.condicaoPaciente && leito.condicaoPaciente !== 'Nenhum' && iconMap[leito.condicaoPaciente]) { const i = iconMap[leito.condicaoPaciente]; parts.push(`<div class="flex items-center space-x-1 ${i.color}" title="${i.title}"><i data-lucide="${i.icon}" class="w-5 h-5"></i><span class="text-xs font-bold">${leito.condicaoPaciente}</span></div>`); }
+                return parts.join('<div class="my-0.5"></div>');
+            },
+            
+            getCareIcons(leito) {
+                let parts = [];
+                const iconMap = {
+                    'fisioterapia': { icon: 'dumbbell', color: 'text-teal-600', title: 'Necessita de Fisioterapia' },
+                    'nutricao': { icon: 'weight', color: 'text-red-600', title: 'Risco Nutricional' },
+                };
+                if (leito.necessitaFisioterapia) { const i = iconMap['fisioterapia']; parts.push(`<div title="${i.title}"><i data-lucide="${i.icon}" class="w-7 h-7 ${i.color}"></i></div>`); }
+                if (leito.riscoNutricional) { const i = iconMap['nutricao']; parts.push(`<div title="${i.title}"><i data-lucide="${i.icon}" class="w-7 h-7 ${i.color}"></i></div>`); }
+                if (parts.length > 0) {
+                    return `<div class="flex items-center justify-center space-x-1.5 mt-1">${parts.join('')}</div>`;
+                }
+                return '';
+            },
+
+            calcularPermanencia(dataAdmissao, dataAlta) {
+                if (!dataAdmissao) return '-';
+                const umDia = 24 * 60 * 60 * 1000;
+                const inicio = this._parseISODateAsLocal(dataAdmissao);
+                const fim = dataAlta ? this._parseISODateAsLocal(dataAlta) : new Date();
+
+                if (!inicio || isNaN(inicio.getTime())) return '-';
+
+                inicio.setHours(0, 0, 0, 0);
+                fim.setHours(0, 0, 0, 0);
+
+                const diffEmMS = Math.abs(fim - inicio);
+                const diffEmDias = Math.round(diffEmMS / umDia) + 1;
+                
+                const label = diffEmDias === 1 ? 'dia de internação' : 'dias de internação';
+                return `${diffEmDias} ${label}`;
+            },
+
+            getRemindersHTML() {
+                const upcomingTeamBirthdays = this.getTeamBirthdaysInNext7Days();
+                let teamBirthdayReminderHTML = '';
+                if (upcomingTeamBirthdays.length > 0) {
+                    const namesAndDates = upcomingTeamBirthdays.map(membro => {
+                        const birthDate = this._parseISODateAsLocal(membro.dataNascimento);
+                        const formattedDate = `${String(birthDate.getDate()).padStart(2, '0')}/${String(birthDate.getMonth() + 1).padStart(2, '0')}`;
+                        return `${membro.nome} (${formattedDate})`;
+                    }).join(', ');
+                    teamBirthdayReminderHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-800 p-3 rounded-md mb-2 flex items-center space-x-3 shadow flex-shrink-0"><i data-lucide="party-popper" class="w-6 h-6"></i><div><p class="font-bold">Aniversários da Equipe na Semana!</p><p class="text-sm">Lembre-se de parabenizar: ${namesAndDates}</p></div></div>`;
+                }
+
+                const upcomingPatientBirthdays = this.getPatientBirthdaysInNext7Days();
+                let patientBirthdayReminderHTML = '';
+                if (upcomingPatientBirthdays.length > 0) {
+                    const namesAndDates = upcomingPatientBirthdays.map(paciente => {
+                        const birthDate = this._parseISODateAsLocal(paciente.dataNascimento);
+                        const formattedDate = `${String(birthDate.getDate()).padStart(2, '0')}/${String(birthDate.getMonth() + 1).padStart(2, '0')}`;
+                        const leito = this.data.leitos.find(l => l.pacienteId === paciente.id);
+                        const leitoInfo = leito ? ` (Leito ${leito.id})` : '';
+                        return `${paciente.nome}${leitoInfo} (${formattedDate})`;
+                    }).join(', ');
+                    patientBirthdayReminderHTML = `<div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-3 rounded-md mb-2 flex items-center space-x-3 shadow flex-shrink-0"><i data-lucide="cake" class="w-6 h-6"></i><div><p class="font-bold">Aniversários de Pacientes na Semana!</p><p class="text-sm">Lembre-se de parabenizar: ${namesAndDates}</p></div></div>`;
+                }
+
+                let reservaReminderHTML = '';
+                const hoje = new Date();
+                hoje.setHours(0, 0, 0, 0);
+                const hojeYMD = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+
+                const reservasHoje = (this.data.reservas || []).filter(r => r.data === hojeYMD);
+                if (reservasHoje.length > 0) {
+                    const plural = reservasHoje.length > 1 ? 's' : '';
+                    reservaReminderHTML = `<div class="bg-indigo-100 border-l-4 border-indigo-500 text-indigo-800 p-3 rounded-md mb-2 flex items-center space-x-3 shadow flex-shrink-0"><i data-lucide="calendar-check" class="w-6 h-6"></i><div><p class="font-bold">Alerta de Reservas!</p><p class="text-sm">Existe${plural} ${reservasHoje.length} reserva${plural} para a data de hoje. Verifique a aba de reservas.</p></div></div>`;
+                }
+
+                return `<div class="flex-shrink-0">${reservaReminderHTML}${teamBirthdayReminderHTML}${patientBirthdayReminderHTML}</div>`;
+            },
+            
+            renderLeitos() {
+                const remindersHTML = this.getRemindersHTML();
+                
+                const pacientesInternados = (this.data.pacientes || []).filter(p => !p.dataAlta);
+                const totalLeitos = this.data.leitos?.length || 0;
+                const leitosOcupados = this.data.leitos?.filter(l => l.status === 'Ocupado').length || 0;
+                const clinicaCount = pacientesInternados.filter(p => p.equipeMedica === 'Clínica').length;
+                const cirurgicaCount = pacientesInternados.filter(p => p.equipeMedica === 'Cirúrgica').length;
+                
+                const indicatorsHTML = `
+                    <footer class="pt-2 flex-shrink-0">
+                        <div class="grid grid-cols-5 gap-2">
+                            <div class="bg-white p-2 rounded-lg shadow-md flex items-center space-x-2"><div class="bg-blue-100 p-2 rounded-full"><i data-lucide="bed" class="w-5 h-5 text-blue-600"></i></div><div><p class="text-gray-500 text-xs">Total de Leitos</p><p class="text-xl font-bold text-gray-800">${totalLeitos}</p></div></div>
+                            <div class="bg-white p-2 rounded-lg shadow-md flex items-center space-x-2"><div class="bg-yellow-100 p-2 rounded-full"><i data-lucide="bed-double" class="w-5 h-5 text-yellow-600"></i></div><div><p class="text-gray-500 text-xs">Ocupados</p><p class="text-xl font-bold text-gray-800">${leitosOcupados}</p></div></div>
+                            <div class="bg-white p-2 rounded-lg shadow-md flex items-center space-x-2"><div class="bg-green-100 p-2 rounded-full"><i data-lucide="stethoscope" class="w-5 h-5 text-green-600"></i></div><div><p class="text-gray-500 text-xs">Equipe Clínica</p><p class="text-xl font-bold text-gray-800">${clinicaCount}</p></div></div>
+                            <div class="bg-white p-2 rounded-lg shadow-md flex items-center space-x-2"><div class="bg-red-100 p-2 rounded-full"><i data-lucide="scissors" class="w-5 h-5 text-red-600"></i></div><div><p class="text-gray-500 text-xs">Equipe Cirúrgica</p><p class="text-xl font-bold text-gray-800">${cirurgicaCount}</p></div></div>
+                            <div class="bg-white p-2 rounded-lg shadow-md flex items-center space-x-2"><div class="bg-purple-100 p-2 rounded-full"><i data-lucide="pie-chart" class="w-5 h-5 text-purple-600"></i></div><div><p class="text-gray-500 text-xs">Ocupação</p><p class="text-xl font-bold text-gray-800">${totalLeitos > 0 ? ((leitosOcupados / totalLeitos) * 100).toFixed(1) : 0}%</p></div></div>
+                        </div>
+                    </footer>`;
+
+                let tableContentHTML;
+
+                if (!this.data.leitos || this.data.leitos.length === 0) {
+                    tableContentHTML = `<tbody><tr><td colspan="10" class="text-center text-gray-500 py-10">Nenhum leito encontrado.<br>Verifique se a planilha "Leitos" contém dados.</td></tr></tbody>`;
+                } else {
+                    let tableRows = this.data.leitos.map(leito => {
+                        try {
+                            const statusColors = { 
+                                Ocupado: { badge: 'bg-yellow-400 text-yellow-800', row: 'bg-yellow-50' }, 
+                                Livre: { badge: 'bg-blue-500 text-white', row: 'bg-white' }, 
+                                Higienização: { badge: 'bg-red-500 text-white', row: 'bg-red-100' }, 
+                                Manutenção: { badge: 'bg-gray-500 text-white', row: 'bg-gray-200' },
+                                Reservado: { badge: 'bg-purple-500 text-white', row: 'bg-purple-100' },
+                                'Em Exame': { badge: 'bg-indigo-500 text-white', row: 'bg-indigo-100' },
+                                'Em Cirurgia': { badge: 'bg-pink-500 text-white', row: 'bg-pink-100' },
+                                Alta: { badge: 'bg-green-600 text-white', row: 'bg-green-200' }
+                            };
+                            const status = leito.status || 'Manutenção';
+                            const colors = statusColors[status] || statusColors.Manutenção;
+                            const paciente = this.data.pacientes.find(p => p.id === leito.pacienteId);
+                            const specialIconsHTML = this.getSpecialIcons(leito);
+                            const careIconsHTML = this.getCareIcons(leito);
+                            let rowColor = (leito.tipoIsolamento && leito.tipoIsolamento !== 'Nenhum') ? 'bg-orange-200' : colors.row;
+
+                            let pacienteInfo, alergias, observacoes, riskScales, actionButtonsHTML, aniversario, equipeMedicaHTML, dietaHTML;
+                            
+                            const admitirButton = `<button onclick="app.openAdmitirModal(${leito.id})" title="Admitir" class="p-1.5 bg-green-500 text-white rounded-md hover:bg-green-600"><i data-lucide="plus-circle" class="w-4 h-4"></i></button>`;
+                            const altaButton = `<button onclick="app.confirmDarAlta(${leito.id})" title="Dar Alta" class="p-1.5 bg-blue-500 text-white rounded-md hover:bg-blue-600"><i data-lucide="log-out" class="w-4 h-4"></i></button>`;
+                            const liberarButton = `<button onclick="app.liberarLeito(${leito.id})" title="Liberar Leito" class="p-1.5 bg-yellow-500 text-white rounded-md hover:bg-yellow-600"><i data-lucide="check" class="w-4 h-4"></i></button>`;
+                            const editButton = `<button onclick="app.openEditLeitoModal(${leito.id})" title="Editar" class="p-1.5 bg-gray-400 text-white rounded-md hover:bg-gray-500"><i data-lucide="pencil" class="w-4 h-4"></i></button>`;
+                            const transferirButton = `<button onclick="app.openTransferirModal(${leito.id})" title="Transferir" class="p-1.5 bg-purple-500 text-white rounded-md hover:bg-purple-600"><i data-lucide="arrow-right-left" class="w-4 h-4"></i></button>`;
+
+                            if (paciente) {
+                                pacienteInfo = `<div><div class="flex items-baseline space-x-2"><p class="font-bold text-lg" title="${paciente.nome}">${this.getInitials(paciente.nome)}</p><p class="text-sm text-gray-600">${this.calcularIdade(paciente.dataNascimento)}</p></div><p class="text-base font-semibold text-blue-800 truncate" title="${paciente.diagnostico}">${paciente.diagnostico || ''}</p></div>`;
+                                alergias = (paciente.alergias && paciente.alergias.trim() !== '' && paciente.alergias.toLowerCase() !== 'nenhuma') ? `<span class="text-red-600 font-bold text-base whitespace-pre-line">${paciente.alergias}</span>` : '<span class="text-gray-500 italic text-sm">Nenhuma</span>';
+                                observacoes = leito.observacoes && leito.observacoes.trim() !== '' ? `<span class="text-sm whitespace-pre-line">${leito.observacoes}</span>` : '<span class="text-gray-500 italic text-sm">N/A</span>';
+                                riskScales = `<div class="flex items-center justify-center space-x-1">${this.getRiskScaleBadgeSimple('braden', paciente.braden || 0)}${this.getRiskScaleBadgeSimple('morse', paciente.morse || 0)}${this.getRiskScaleBadgeSimple('fugulin', paciente.fugulin || 0)}</div>`;
+                                aniversario = this.getBirthdayInfo(paciente.dataNascimento);
+                                actionButtonsHTML = `${transferirButton} ${altaButton} ${editButton}`;
+                                equipeMedicaHTML = paciente.equipeMedica === 'Cirúrgica' ? `<div class="flex items-center justify-center space-x-1 text-red-600" title="Equipe Cirúrgica"><i data-lucide="scissors"></i><span class="text-xs font-bold">${paciente.equipeMedica}</span></div>` : `<div class="flex items-center justify-center space-x-1 text-green-600" title="Equipe Clínica"><i data-lucide="stethoscope"></i><span class="text-xs font-bold">${paciente.equipeMedica}</span></div>`;
+                                dietaHTML = paciente.dieta ? `<span class="font-semibold">${paciente.dieta}</span>` : '<span class="text-gray-500 italic">N/D</span>';
+                            } else {
+                                pacienteInfo = '<span class="text-gray-500 italic">Vago</span>';
+                                alergias = observacoes = riskScales = aniversario = equipeMedicaHTML = dietaHTML = '-';
+                                if (status === 'Livre' || status === 'Reservado') actionButtonsHTML = `${admitirButton} ${editButton}`;
+                                else if (status === 'Higienização' || status === 'Alta') actionButtonsHTML = `${liberarButton} ${editButton}`;
+                                else actionButtonsHTML = editButton;
+                            }
+
+                            const statusHTML = `<div><span class="px-2 py-1 rounded-md text-xs font-bold ${colors.badge}">${status}</span>${paciente ? `<div class="text-xs text-gray-600 font-bold mt-1">${this.calcularPermanencia(paciente.dataAdmissao, paciente.dataAlta)}</div>` : ''}</div>`;
+                            
+                            const obsClass = leito.observacoes && leito.observacoes.trim() !== '' ? 'p-1 align-middle text-center bg-red-700 text-white font-bold' : 'p-1 text-left align-middle';
+
+                            return `<tr class="transition-colors duration-200 ${rowColor}">
+                                <td class="p-1 align-middle text-center"><div class="flex flex-col items-center justify-center"><span class="font-bold text-xl text-blue-800">${leito.id}</span>${specialIconsHTML}${careIconsHTML}</div></td>
+                                <td class="p-1 align-middle text-center">${statusHTML}</td>
+                                <td class="p-1 text-left align-middle">${pacienteInfo}</td>
+                                <td class="p-1 align-middle text-center">${equipeMedicaHTML}</td>
+                                <td class="p-1 align-middle text-center">${dietaHTML}</td>
+                                <td class="p-1 text-left align-middle">${alergias}</td>
+                                <td class="${obsClass}">${observacoes}</td>
+                                <td class="p-1 align-middle">${riskScales}</td>
+                                <td class="p-1 align-middle"><div class="flex items-center justify-center space-x-1">${actionButtonsHTML}</div></td>
+                                <td class="p-1 align-middle text-center">${aniversario}</td>
+                            </tr>`;
+                        } catch (error) {
+                            console.error("Erro ao renderizar o leito:", leito, error);
+                            return `<tr><td colspan="10" class="p-4 text-red-500 text-center">Ocorreu um erro ao processar os dados deste leito. Verifique a consola.</td></tr>`;
+                        }
+                    }).join('');
+                    tableContentHTML = `<tbody class="divide-y divide-gray-200">${tableRows}</tbody>`;
+                }
+                
+                const tableContainerHTML = `
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden flex-grow flex flex-col">
+                        <div class="flex-grow overflow-y-auto subtle-scrollbar">
+                            <table class="w-full">
+                                <thead class="bg-gray-100 sticky top-0 z-10">
+                                    <tr class="text-center">
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[5%]">Leito</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[10%]">Status</th>
+                                        <th class="p-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[15%]">Paciente</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[8%]">Equipe</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[8%]">Dieta</th>
+                                        <th class="p-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Alergias</th>
+                                        <th class="p-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Observações</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[15%]">Escalas</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[8%]">Ação</th>
+                                        <th class="p-2 text-xs font-semibold text-gray-600 uppercase tracking-wider w-[8%]">Aniversário</th>
+                                    </tr>
+                                </thead>
+                                ${tableContentHTML}
+                            </table>
+                        </div>
+                    </div>`;
+
+                document.getElementById('app-content').innerHTML = remindersHTML + tableContainerHTML + indicatorsHTML;
+            },
+            
+            renderPacientes() {
+                const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                const currentMonthName = months[this.patientFilter.month];
+                const currentYear = this.patientFilter.year;
+                const years = [...new Set((this.data.pacientes || []).filter(p => p.dataAdmissao).map(p => p.dataAdmissao.substring(0, 4)))].sort((a, b) => b - a);
+                if (!years.includes(String(new Date().getFullYear()))) { years.unshift(String(new Date().getFullYear())); }
+
+                const filterHTML = `
+                    <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                        <h2 class="text-xl font-bold text-gray-700">Histórico de Admissões</h2>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="app.exportarXLS()" class="px-3 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 flex items-center space-x-2"><i data-lucide="file-spreadsheet"></i><span>XLS</span></button>
+                            <div class="w-px bg-gray-300 h-8 mx-2"></div>
+                            <button onclick="app.changePatientFilter(-1)" title="Mês Anterior" class="p-2 rounded-md hover:bg-gray-200"><i data-lucide="chevron-left"></i></button>
+                            <span class="font-bold text-lg w-32 text-center">${currentMonthName}</span>
+                            <button onclick="app.changePatientFilter(1)" title="Próximo Mês" class="p-2 rounded-md hover:bg-gray-200"><i data-lucide="chevron-right"></i></button>
+                            <select onchange="app.setPatientFilterYear(this.value)" class="p-2 border rounded-md bg-white">
+                                ${years.map(y => `<option value="${y}" ${y == currentYear ? 'selected' : ''}>${y}</option>`).join('')}
+                            </select>
+                            <button onclick="app.openAddPacienteModal()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center space-x-2"><i data-lucide="user-plus"></i><span>Adicionar</span></button>
+                        </div>
+                    </div>`;
+                
+                const filterPrefix = `${this.patientFilter.year}-${String(this.patientFilter.month + 1).padStart(2, '0')}`;
+                const filteredPacientes = (this.data.pacientes || []).filter(p => {
+                    return p.dataAdmissao && p.dataAdmissao.startsWith(filterPrefix);
+                });
+                
+                const tableRows = filteredPacientes.map(p => {
+                    const leito = this.data.leitos.find(l => l.pacienteId === p.id);
+                    const admDate = this.formatDateToBR(p.dataAdmissao);
+                    const altaDate = p.dataAlta ? this.formatDateToBR(p.dataAlta) : '<span class="italic text-green-700 font-semibold">Internado</span>';
+                    const tipoAltaDisplay = p.dataAlta ? (p.tipoAlta || 'Melhorado') : '-';
+                    const permanencia = this.calcularPermanencia(p.dataAdmissao, p.dataAlta);
+                    const acompanhante = p.acompanhante ? 'Sim' : 'Não';
+                    return `<tr class="hover:bg-gray-50"><td class="p-4 font-medium text-gray-800">${p.nome}</td><td class="p-4">${p.prontuario || '-'}</td><td class="p-4">${p.saram || '-'}</td><td class="p-4">${admDate}</td><td class="p-4">${altaDate}</td><td class="p-4">${tipoAltaDisplay}</td><td class="p-4 text-center">${permanencia}</td><td class="p-4 text-center">${leito ? `<span class="font-bold text-blue-600">${leito.id}</span>` : '-'}</td><td class="p-4 text-center">${acompanhante}</td><td class="p-4 text-center"><div class="flex items-center justify-center space-x-1"><button onclick="app.openEditPacienteModal(${p.id})" title="Editar" class="p-2 text-blue-600 hover:text-blue-800"><i data-lucide="pencil" class="w-5 h-5"></i></button><button onclick="app.confirmDeletePaciente(${p.id})" title="Excluir" class="p-2 text-red-600 hover:text-red-800"><i data-lucide="trash-2" class="w-5 h-5"></i></button></div></td></tr>`;
+                }).join('');
+
+                const table = `<div class="bg-white rounded-lg shadow-md overflow-auto flex-grow"><table class="w-full"><thead class="bg-gray-100 sticky top-0"><tr><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Nome</th><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Prontuário</th><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">SARAM</th><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Admissão</th><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Alta</th><th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Tipo Alta</th><th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Permanência</th><th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Leito</th><th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Acompanhante</th><th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Ações</th></tr></thead><tbody class="divide-y divide-gray-200">${tableRows}</tbody></table>${filteredPacientes.length === 0 ? '<p class="text-center text-gray-500 py-10">Nenhuma admissão encontrada para este período.</p>' : ''}</div>`;
+                document.getElementById('app-content').innerHTML = filterHTML + table;
+            },
+
+            renderFisioterapia() {
+                const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                const currentMonthName = months[this.fisioterapiaFilter.month];
+                const currentYear = this.fisioterapiaFilter.year;
+                const years = [...new Set((this.data.pacientes || []).filter(p => p.dataAdmissao).map(p => p.dataAdmissao.substring(0, 4)))].sort((a, b) => b - a);
+                if (!years.includes(String(new Date().getFullYear()))) { years.unshift(String(new Date().getFullYear())); }
+
+                const filterHTML = `
+                    <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                        <h2 class="text-xl font-bold text-gray-700">Pacientes em Fisioterapia</h2>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="app.changeFisioterapiaFilter(-1)" title="Mês Anterior" class="p-2 rounded-md hover:bg-gray-200"><i data-lucide="chevron-left"></i></button>
+                            <span class="font-bold text-lg w-32 text-center">${currentMonthName}</span>
+                            <button onclick="app.changeFisioterapiaFilter(1)" title="Próximo Mês" class="p-2 rounded-md hover:bg-gray-200"><i data-lucide="chevron-right"></i></button>
+                            <select onchange="app.setFisioterapiaFilterYear(this.value)" class="p-2 border rounded-md bg-white">
+                                ${years.map(y => `<option value="${y}" ${y == currentYear ? 'selected' : ''}>${y}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>`;
+
+                const leitosComFisio = this.data.leitos.filter(l => l.necessitaFisioterapia === true);
+                const pacienteIdsComFisio = leitosComFisio.map(l => l.pacienteId);
+
+                const filterPrefix = `${this.fisioterapiaFilter.year}-${String(this.fisioterapiaFilter.month + 1).padStart(2, '0')}`;
+                
+                const filteredPacientes = this.data.pacientes.filter(p => 
+                    pacienteIdsComFisio.includes(p.id) &&
+                    p.dataAdmissao && p.dataAdmissao.startsWith(filterPrefix)
+                );
+                
+                const tableRows = filteredPacientes.map(p => {
+                    const leito = leitosComFisio.find(l => l.pacienteId === p.id);
+                    const admDate = this.formatDateToBR(p.dataAdmissao);
+                    const permanencia = this.calcularPermanencia(p.dataAdmissao, null);
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="p-4 font-medium text-gray-800">${p.nome}</td>
+                            <td class="p-4 text-center">${p.prontuario || '-'}</td>
+                            <td class="p-4 text-center font-bold text-blue-600">${leito ? leito.id : '-'}</td>
+                            <td class="p-4">${admDate}</td>
+                            <td class="p-4 text-center">${permanencia}</td>
+                        </tr>`;
+                }).join('');
+
+                const table = `
+                    <div class="bg-white rounded-lg shadow-md overflow-auto flex-grow">
+                        <table class="w-full">
+                            <thead class="bg-gray-100 sticky top-0">
+                                <tr>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Nome</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Prontuário</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Leito</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Admissão</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Dias de Internação</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">${tableRows}</tbody>
+                        </table>
+                        ${filteredPacientes.length === 0 ? '<p class="text-center text-gray-500 py-10">Nenhum paciente em fisioterapia admitido neste período.</p>' : ''}
+                    </div>`;
+
+                document.getElementById('app-content').innerHTML = filterHTML + table;
+            },
+
+            renderEquipe() {
+                const turnos = ['Manhã', 'Tarde', 'Noite A', 'Noite B'];
+                let tableContentHTML = '';
+
+                turnos.forEach(turno => {
+                    const membrosDoTurno = (this.data.equipe || []).filter(m => m.turno === turno);
+                    if (membrosDoTurno.length > 0) {
+                        tableContentHTML += `<tbody class="bg-white"><tr class="bg-gray-200"><th colspan="4" class="p-2 text-left text-sm font-semibold text-gray-700">${turno}</th></tr>`;
+                        
+                        membrosDoTurno.forEach(membro => {
+                            const aniversarioInfo = this.getBirthdayInfo(membro.dataNascimento);
+                            tableContentHTML += `<tr class="hover:bg-gray-50">
+                                <td class="p-4 font-medium text-gray-800">${membro.nome}</td>
+                                <td class="p-4 text-gray-600">${membro.funcao}</td>
+                                <td class="p-4">${aniversarioInfo}</td>
+                                <td class="p-4 text-center">
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <button onclick="app.openEditEquipeModal(${membro.id})" title="Editar" class="p-2 text-blue-600 hover:text-blue-800"><i data-lucide="pencil" class="w-5 h-5"></i></button>
+                                        <button onclick="app.confirmDeleteMembro(${membro.id})" title="Excluir" class="p-2 text-red-600 hover:text-red-800"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                        });
+                        tableContentHTML += `</tbody>`;
+                    }
+                });
+
+                const semTurno = (this.data.equipe || []).filter(m => !m.turno || !turnos.includes(m.turno));
+                if(semTurno.length > 0) {
+                    tableContentHTML += `<tbody class="bg-white"><tr class="bg-gray-200"><th colspan="4" class="p-2 text-left text-sm font-semibold text-gray-700">Sem Turno Definido</th></tr>`;
+                    semTurno.forEach(membro => {
+                        const aniversarioInfo = this.getBirthdayInfo(membro.dataNascimento);
+                        tableContentHTML += `<tr class="hover:bg-gray-50">
+                            <td class="p-4 font-medium text-gray-800">${membro.nome}</td>
+                            <td class="p-4 text-gray-600">${membro.funcao}</td>
+                            <td class="p-4">${aniversarioInfo}</td>
+                            <td class="p-4 text-center">
+                                <div class="flex items-center justify-center space-x-2">
+                                    <button onclick="app.openEditEquipeModal(${membro.id})" title="Editar" class="p-2 text-blue-600 hover:text-blue-800"><i data-lucide="pencil" class="w-5 h-5"></i></button>
+                                    <button onclick="app.confirmDeleteMembro(${membro.id})" title="Excluir" class="p-2 text-red-600 hover:text-red-800"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                                </div>
+                            </td>
+                        </tr>`;
+                    });
+                    tableContentHTML += `</tbody>`;
+                }
+
+                const content = `
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-700">Cadastro da Equipe</h2>
+                        <button onclick="app.openAddEquipeModal()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center space-x-2"><i data-lucide="user-plus"></i><span>Adicionar Membro</span></button>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-md overflow-auto flex-grow">
+                        <table class="w-full">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Nome</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Função</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Aniversário</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Ações</th>
+                                </tr>
+                            </thead>
+                            ${tableContentHTML}
+                        </table>
+                    </div>`;
+                document.getElementById('app-content').innerHTML = content;
+            },
+            
+            renderReservas() {
+                const content = `
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-700">Reservas de Internação</h2>
+                        <button onclick="app.openAddReservaModal()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center space-x-2"><i data-lucide="calendar-plus"></i><span>Nova Reserva</span></button>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-md overflow-auto flex-grow">
+                        <table class="w-full">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Data</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Nome do Paciente</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Motivo</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${(this.data.reservas || []).sort((a,b) => new Date(a.data) - new Date(b.data)).map(reserva => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="p-4 font-medium text-gray-800">${this.formatDateToBR(reserva.data)}</td>
+                                        <td class="p-4 text-gray-600">${reserva.nome}</td>
+                                        <td class="p-4 text-gray-600">${reserva.motivo}</td>
+                                        <td class="p-4 text-center">
+                                            <button onclick="app.confirmDeleteReserva(${reserva.id})" title="Excluir Reserva" class="p-2 text-red-600 hover:text-red-800"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                                ${!this.data.reservas || this.data.reservas.length === 0 ? '<tr><td colspan="4" class="text-center text-gray-500 py-10">Nenhuma reserva encontrada.</td></tr>' : ''}
+                            </tbody>
+                        </table>
+                    </div>`;
+                document.getElementById('app-content').innerHTML = content;
+            },
+
+            renderEscalas() {
+                const content = `
+                    <div id="escalas-view-container">
+                        <p class="text-center text-gray-500 py-10">A carregar vista de escalas...</p>
+                    </div>
+                `;
+                document.getElementById('app-content').innerHTML = content;
+                this.updateEscalasView();
+            },
+            
+            updateEscalasView() {
+                const container = document.getElementById('escalas-view-container');
+                if (!container) return;
+
+                const pacienteFilter = container.querySelector('#escala-paciente-filter')?.value || '';
+                const dateFilter = container.querySelector('#escala-date-filter')?._flatpickr.selectedDates;
+                
+                let filteredEscalas = [...this.data.escalas];
+
+                if (pacienteFilter) {
+                    const lowerCaseFilter = pacienteFilter.toLowerCase();
+                    const patientIds = this.data.pacientes
+                        .filter(p => p.nome.toLowerCase().includes(lowerCaseFilter))
+                        .map(p => p.id);
+                    filteredEscalas = filteredEscalas.filter(e => patientIds.includes(e.pacienteId));
+                }
+
+                if (dateFilter && dateFilter.length === 2) {
+                    const startDate = dateFilter[0];
+                    startDate.setHours(0,0,0,0);
+                    const endDate = dateFilter[1];
+                    endDate.setHours(23,59,59,999);
+
+                    filteredEscalas = filteredEscalas.filter(e => {
+                        const escalaDate = new Date(e.data + 'T00:00:00Z');
+                        return escalaDate >= startDate && escalaDate <= endDate;
+                    });
+                }
+                
+                filteredEscalas.sort((a, b) => new Date(b.data) - new Date(a.data) || b.escalaId - a.escalaId);
+                
+                const tableRows = filteredEscalas.map(escala => {
+                    const paciente = this.data.pacientes.find(p => p.id === escala.pacienteId);
+                    if (!paciente) return '';
+                    const leito = this.data.leitos.find(l => l.pacienteId === paciente.id);
+
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="p-4">${this.formatDateToBR(escala.data)}</td>
+                            <td class="p-4 font-medium text-gray-800">${paciente.nome}</td>
+                            <td class="p-4 text-center">${leito ? leito.id : '-'}</td>
+                            <td class="p-4 text-center">${escala.braden}</td>
+                            <td class="p-4 text-center">${escala.morse}</td>
+                            <td class="p-4 text-center">${escala.fugulin}</td>
+                            <td class="p-4 text-center">
+                                <button onclick="app.openHistoricoEscalasModal(${paciente.id})" title="Ver Histórico" class="p-2 text-blue-600 hover:text-blue-800">
+                                    <i data-lucide="history" class="w-5 h-5"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const content = `
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
+                        <h2 class="text-xl font-bold text-gray-700 w-full md:w-auto">Histórico de Escalas</h2>
+                        <div class="flex items-center space-x-2 flex-wrap gap-2">
+                             <input type="text" id="escala-paciente-filter" placeholder="Filtrar por nome..." class="w-full md:w-auto px-3 py-2 border border-gray-300 rounded-md">
+                             <input type="text" id="escala-date-filter" placeholder="Filtrar por data..." class="w-full md:w-auto px-3 py-2 border border-gray-300 rounded-md">
+                            <button onclick="app.exportarEscalasXLS()" class="px-3 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 flex items-center space-x-2"><i data-lucide="file-spreadsheet"></i><span>XLS</span></button>
+                             <button onclick="app.openLancarEscalasModal()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center space-x-2"><i data-lucide="plus-circle"></i><span>Lançar Escalas do Dia</span></button>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-md overflow-auto flex-grow">
+                        <table class="w-full">
+                            <thead class="bg-gray-100 sticky top-0">
+                                <tr>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Data</th>
+                                    <th class="p-4 text-left text-sm font-semibold text-gray-600 uppercase">Paciente</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Leito</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Braden</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Morse</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Fugulin</th>
+                                    <th class="p-4 text-center text-sm font-semibold text-gray-600 uppercase">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">${tableRows}</tbody>
+                        </table>
+                        ${filteredEscalas.length === 0 ? '<p class="text-center text-gray-500 py-10">Nenhum registo de escala encontrado para os filtros selecionados.</p>' : ''}
+                    </div>`;
+                container.innerHTML = content;
+                lucide.createIcons();
+                
+                document.getElementById('escala-paciente-filter').addEventListener('input', () => this.updateEscalasView());
+                flatpickr("#escala-date-filter", { 
+                    mode: "range",
+                    dateFormat: "d/m/Y",
+                    locale: "pt",
+                    onChange: () => this.updateEscalasView(),
+                });
+            },
+
+            openLancarEscalasModal() {
+                const hoje = new Date().toISOString().split('T')[0];
+                const pacientesInternados = this.data.pacientes.filter(p => !p.dataAlta);
+                const modalContent = document.getElementById('lancarEscalasModalContent');
+                
+                let tableRows = pacientesInternados.map(p => {
+                    let escalaDeHoje = this.data.escalas.filter(e => e.pacienteId === p.id && e.data === hoje).sort((a, b) => b.escalaId - a.escalaId)[0];
+                    if (!escalaDeHoje) { escalaDeHoje = { braden: p.braden, morse: p.morse, fugulin: p.fugulin }; }
+
+                    return `
+                        <tr class="hover:bg-gray-50" data-paciente-id="${p.id}">
+                            <td class="p-2 font-medium text-gray-800">${p.nome}</td>
+                            <td class="p-2"><input type="number" value="${escalaDeHoje.braden || ''}" class="w-full px-2 py-1 border border-gray-300 rounded-md" data-escala="braden"></td>
+                            <td class="p-2"><input type="number" value="${escalaDeHoje.morse || ''}" class="w-full px-2 py-1 border border-gray-300 rounded-md" data-escala="morse"></td>
+                            <td class="p-2"><input type="number" value="${escalaDeHoje.fugulin || ''}" class="w-full px-2 py-1 border border-gray-300 rounded-md" data-escala="fugulin"></td>
+                        </tr>`;
+                }).join('');
+
+                modalContent.innerHTML = `
+                    <h2 class="text-2xl font-bold mb-4">Lançar Escalas do Dia (${this.formatDateToBR(hoje)})</h2>
+                    <div class="max-h-[60vh] overflow-y-auto subtle-scrollbar">
+                        <table class="w-full">
+                            <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2 text-left">Paciente</th><th class="p-2 text-left">Braden</th><th class="p-2 text-left">Morse</th><th class="p-2 text-left">Fugulin</th></tr></thead>
+                            <tbody class="divide-y">${tableRows}</tbody>
+                        </table>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="app.closeModal('lancarEscalasModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button>
+                        <button type="button" onclick="app.salvarEscalas()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">Salvar Alterações</button>
+                    </div>`;
+                this.openModal('lancarEscalasModal');
+            },
+
+            salvarEscalas() {
+                const hoje = new Date().toISOString().split('T')[0];
+                const rows = document.querySelectorAll('#lancarEscalasModalContent tbody tr');
+                
+                rows.forEach(row => {
+                    const pacienteId = parseInt(row.dataset.pacienteId);
+                    const braden = parseInt(row.querySelector('[data-escala="braden"]').value);
+                    const morse = parseInt(row.querySelector('[data-escala="morse"]').value);
+                    const fugulin = parseInt(row.querySelector('[data-escala="fugulin"]').value);
+
+                    this.data.escalas = this.data.escalas.filter(e => !(e.pacienteId === pacienteId && e.data === hoje));
+
+                    const novaEscala = {
+                        escalaId: Date.now() + Math.random(),
+                        pacienteId, data: hoje, braden, morse, fugulin
+                    };
+                    this.data.escalas.push(novaEscala);
+
+                    const paciente = this.data.pacientes.find(p => p.id === pacienteId);
+                    if(paciente) {
+                        paciente.braden = braden;
+                        paciente.morse = morse;
+                        paciente.fugulin = fugulin;
+                    }
+                });
+                this.saveDataToGoogleSheets();
+                this.closeModal('lancarEscalasModal');
+                alert('Escalas salvas com sucesso!');
+            },
+            
+            openHistoricoEscalasModal(pacienteId) {
+                const paciente = this.data.pacientes.find(p => p.id === pacienteId);
+                if (!paciente) return;
+
+                const historico = this.data.escalas
+                    .filter(e => e.pacienteId === pacienteId)
+                    .sort((a,b) => new Date(b.data) - new Date(a.data));
+
+                const tableRows = historico.map(e => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="p-2">${this.formatDateToBR(e.data)}</td>
+                        <td class="p-2 text-center">${e.braden}</td>
+                        <td class="p-2 text-center">${e.morse}</td>
+                        <td class="p-2 text-center">${e.fugulin}</td>
+                    </tr>
+                `).join('');
+
+                const modalContent = document.getElementById('historicoEscalasModalContent');
+                modalContent.innerHTML = `
+                    <h2 class="text-2xl font-bold mb-4">Histórico de Escalas: ${paciente.nome}</h2>
+                    <div class="max-h-[60vh] overflow-y-auto subtle-scrollbar">
+                         <table class="w-full">
+                            <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2 text-left">Data</th><th class="p-2 text-center">Braden</th><th class="p-2 text-center">Morse</th><th class="p-2 text-center">Fugulin</th></tr></thead>
+                            <tbody class="divide-y">${tableRows}</tbody>
+                        </table>
+                        ${historico.length === 0 ? '<p class="text-center text-gray-500 py-10">Nenhum histórico encontrado para este paciente.</p>' : ''}
+                    </div>
+                    <div class="flex justify-end mt-6">
+                        <button type="button" onclick="app.closeModal('historicoEscalasModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Fechar</button>
+                    </div>
+                `;
+                this.openModal('historicoEscalasModal');
+            },
+
+            exportarEscalasXLS() {
+                const pacienteFilter = document.getElementById('escala-paciente-filter')?.value || '';
+                const dateFilter = document.getElementById('escala-date-filter')?._flatpickr.selectedDates;
+                
+                let filteredEscalas = [...this.data.escalas];
+
+                if (pacienteFilter) {
+                    const lowerCaseFilter = pacienteFilter.toLowerCase();
+                    const patientIds = this.data.pacientes.filter(p => p.nome.toLowerCase().includes(lowerCaseFilter)).map(p => p.id);
+                    filteredEscalas = filteredEscalas.filter(e => patientIds.includes(e.pacienteId));
+                }
+
+                if (dateFilter && dateFilter.length === 2) {
+                    const startDate = dateFilter[0]; startDate.setHours(0,0,0,0);
+                    const endDate = dateFilter[1]; endDate.setHours(23,59,59,999);
+                    filteredEscalas = filteredEscalas.filter(e => {
+                        const escalaDate = new Date(e.data + 'T00:00:00Z');
+                        return escalaDate >= startDate && escalaDate <= endDate;
+                    });
+                }
+                
+                const dataToExport = filteredEscalas.map(escala => {
+                    const paciente = this.data.pacientes.find(p => p.id === escala.pacienteId);
+                    return {
+                        'Data': this.formatDateToBR(escala.data),
+                        'Paciente': paciente ? paciente.nome : 'Desconhecido',
+                        'Prontuário': paciente ? paciente.prontuario : '',
+                        'Braden': escala.braden,
+                        'Morse': escala.morse,
+                        'Fugulin': escala.fugulin
+                    }
+                }).sort((a,b) => new Date(this.formatDateToISO(b.Data)) - new Date(this.formatDateToISO(a.Data)));
+
+                const ws = XLSX.utils.json_to_sheet(dataToExport);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Histórico de Escalas");
+                XLSX.writeFile(wb, `relatorio_escalas.xlsx`);
+            },
+            
+            showConfirmModal(title, message, onConfirm) { 
+                document.getElementById('confirmModalTitle').textContent = title;
+                document.getElementById('confirmModalMessage').textContent = message;
+                const confirmButton = document.getElementById('confirmButton');
+                const cancelButton = document.getElementById('cancelButton');
+                const newConfirmButton = confirmButton.cloneNode(true);
+                confirmButton.parentNode.replaceChild(newConfirmButton, confirmButton);
+                const newCancelButton = cancelButton.cloneNode(true);
+                cancelButton.parentNode.replaceChild(newCancelButton, cancelButton);
+                newConfirmButton.style.display = 'inline-flex';
+                newCancelButton.textContent = 'Cancelar';
+                const closeAndCleanup = () => this.closeModal('confirmModal');
+                newConfirmButton.addEventListener('click', () => {
+                    if (typeof onConfirm === 'function') onConfirm();
+                    closeAndCleanup();
+                });
+                newCancelButton.addEventListener('click', closeAndCleanup);
+                this.openModal('confirmModal');
+                lucide.createIcons();
+            },
+
+            confirmDarAlta(leitoId) {
+                const leito = this.data.leitos.find(l => l.id === leitoId);
+                const paciente = this.data.pacientes.find(p => p.id === leito.pacienteId);
+                if (!paciente) return;
+                document.getElementById('altaModalTitle').textContent = `Dar Alta para ${paciente.nome}`;
+                document.getElementById('altaLeitoId').value = leitoId;
+                this.openModal('altaModal');
+            },
+
+            processarAlta(leitoId, tipoAlta) { 
+                const leito = this.data.leitos.find(l => l.id === leitoId);
+                if(leito && leito.pacienteId) {
+                    const paciente = this.data.pacientes.find(p => p.id === leito.pacienteId);
+                    if (paciente) {
+                        paciente.dataAlta = new Date().toISOString().split('T')[0];
+                        paciente.tipoAlta = tipoAlta;
+                    }
+                    leito.status = 'Alta';
+                    leito.pacienteId = null;
+                    leito.observacoes = `Alta em ${this.formatDateToBR(new Date().toISOString().split('T')[0])}`;
+                    leito.tipoIsolamento = 'Nenhum';
+                    leito.condicaoPaciente = 'Nenhum';
+                    leito.necessitaFisioterapia = false;
+                    leito.riscoNutricional = false;
+                    this.saveDataToGoogleSheets();
+                    this.requestRender();
+                }
+            },
+
+            liberarLeito(leitoId) {
+                const leito = this.data.leitos.find(l => l.id === leitoId);
+                if (leito) {
+                    leito.status = 'Livre';
+                    leito.observacoes = '';
+                    this.saveDataToGoogleSheets();
+                    this.requestRender();
+                }
+            },
+
+            openAdmitirModal(leitoId) {
+                const modalContent = document.getElementById('admitirPacienteModalContent');
+                const pacientesDisponiveis = this.data.pacientes.filter(p => !p.dataAlta && !this.data.leitos.some(l => l.pacienteId === p.id));
+                if (pacientesDisponiveis.length === 0) { modalContent.innerHTML = `<h2 class="text-2xl font-bold mb-4 text-center">Nenhum Paciente</h2><p class="text-center text-gray-600">Não há pacientes sem leito para admitir.</p><div class="flex justify-center mt-6"><button type="button" onclick="app.closeModal('admitirPacienteModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Fechar</button></div>`; } 
+                else { modalContent.innerHTML = `<h2 class="text-2xl font-bold mb-4">Admitir Paciente</h2><form id="admitirForm"><input type="hidden" id="leitoIdAdmitir" value="${leitoId}"><div class="mb-4"><label for="pacienteSelect" class="block text-sm font-medium text-gray-700 mb-1">Selecione o Paciente</label><select id="pacienteSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">${pacientesDisponiveis.map(p => `<option value="${p.id}">${p.nome}</option>`).join('')}</select></div><div class="flex justify-end space-x-3"><button type="button" onclick="app.closeModal('admitirPacienteModal')" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Admitir</button></div></form>`; }
+                this.openModal('admitirPacienteModal');
+            },
+
+            openAddPacienteModal() {
+                document.getElementById('addPacienteForm').reset();
+                document.getElementById('pacienteId').value = '';
+                document.getElementById('pacienteModalTitle').textContent = 'Novo Paciente';
+                
+                const fpAdmissao = document.getElementById('pacienteAdmissao')._flatpickr;
+                if (fpAdmissao) fpAdmissao.setDate(new Date(), true);
+
+                this.openModal('addPacienteModal');
+            },
+
+            openEditPacienteModal(pacienteId) {
+                const paciente = this.data.pacientes.find(p => p.id === pacienteId);
+                if (!paciente) return;
+
+                document.getElementById('pacienteId').value = paciente.id;
+                document.getElementById('pacienteModalTitle').textContent = 'Editar Paciente';
+                
+                document.getElementById('pacienteNome').value = paciente.nome;
+                document.getElementById('pacienteProntuario').value = paciente.prontuario;
+                document.getElementById('pacienteSaram').value = paciente.saram || '';
+                
+                const fpNascimento = document.getElementById('pacienteNascimento')._flatpickr;
+                if(fpNascimento && paciente.dataNascimento) {
+                    const safeDate = this._parseISODateAsLocal(paciente.dataNascimento);
+                    if (safeDate) fpNascimento.setDate(safeDate, true);
+                }
+                
+                const fpAdmissao = document.getElementById('pacienteAdmissao')._flatpickr;
+                if(fpAdmissao && paciente.dataAdmissao) {
+                    const safeDate = this._parseISODateAsLocal(paciente.dataAdmissao);
+                    if (safeDate) fpAdmissao.setDate(safeDate, true);
+                }
+
+                document.getElementById('pacienteSexo').value = paciente.sexo;
+                document.getElementById('pacienteEquipe').value = paciente.equipeMedica;
+                document.getElementById('pacienteDieta').value = paciente.dieta || 'Branda';
+                document.getElementById('pacienteAcompanhante').checked = paciente.acompanhante || false;
+                document.getElementById('pacienteDiagnostico').value = paciente.diagnostico;
+                document.getElementById('pacienteAlergias').value = paciente.alergias;
+                document.getElementById('pacienteBraden').value = paciente.braden;
+                document.getElementById('pacienteMorse').value = paciente.morse;
+                document.getElementById('pacienteFugulin').value = paciente.fugulin;
+                
+                this.openModal('addPacienteModal');
+            },
+
+            // INÍCIO: FUNÇÃO EDITAR LEITO MODIFICADA
+            openEditLeitoModal(leitoId) {
+                const leito = this.data.leitos.find(l => l.id === leitoId); if (!leito) return;
+                
+                // Busca de elementos do DOM
+                const statusSelect = document.getElementById('editLeitoStatus'); 
+                const statusHelper = document.getElementById('editStatusHelper'); 
+                const condicaoSelect = document.getElementById('editCondicaoPaciente');
+                const dietaSelect = document.getElementById('editPacienteDieta'); // NOVO
+                const fisioterapiaCheck = document.getElementById('editFisioterapia');
+                const riscoNutricionalCheck = document.getElementById('editRiscoNutricional');
+                const careNeedsDiv = document.getElementById('editCareNeeds');
+
+                statusSelect.value = leito.status;
+                
+                const isOccupied = leito.status === 'Ocupado' || leito.status === 'Em Exame' || leito.status === 'Em Cirurgia';
+                const paciente = isOccupied ? this.data.pacientes.find(p => p.id === leito.pacienteId) : null;
+
+                statusSelect.disabled = false; 
+                
+                Array.from(statusSelect.options).forEach(option => {
+                    option.disabled = isOccupied ? (option.value === 'Livre' || option.value === 'Reservado') : (option.value === 'Ocupado');
+                });
+
+
+                if (isOccupied && paciente) {
+                    statusHelper.textContent = "Para liberar o leito, por favor, realize a alta do paciente."; 
+                    statusHelper.classList.remove('hidden'); 
+                    condicaoSelect.disabled = false; 
+                    dietaSelect.disabled = false; // Habilita dieta
+                    dietaSelect.value = paciente.dieta || 'Branda'; // Preenche com a dieta atual
+                    careNeedsDiv.style.display = 'block';
+                    fisioterapiaCheck.checked = leito.necessitaFisioterapia || false;
+                    riscoNutricionalCheck.checked = leito.riscoNutricional || false;
+                } else { 
+                    statusHelper.classList.add('hidden'); 
+                    condicaoSelect.disabled = true; 
+                    dietaSelect.disabled = true; // Desabilita dieta
+                    dietaSelect.value = 'Branda'; // Reseta para o padrão
+                    careNeedsDiv.style.display = 'none';
+                    fisioterapiaCheck.checked = false;
+                    riscoNutricionalCheck.checked = false;
+                }
+                
+                document.getElementById('editLeitoId').value = leito.id; 
+                document.getElementById('editLeitoTipoIsolamento').value = leito.tipoIsolamento || 'Nenhum'; 
+                document.getElementById('editCondicaoPaciente').value = leito.condicaoPaciente || 'Nenhum'; 
+                document.getElementById('editLeitoObservacoes').value = leito.observacoes || '';
+                
+                this.openModal('editLeitoModal');
+            },
+            // FIM: FUNÇÃO EDITAR LEITO MODIFICADA
+
+            openAddEquipeModal() {
+                document.getElementById('addEditEquipeForm').reset();
+                document.getElementById('equipeMembroId').value = '';
+                document.getElementById('equipeModalTitle').textContent = 'Adicionar Novo Membro';
+                this.openModal('addEditEquipeModal');
+            },
+
+            openEditEquipeModal(membroId) {
+                const membro = this.data.equipe.find(m => m.id === membroId);
+                if (!membro) return;
+                document.getElementById('equipeMembroId').value = membro.id;
+                document.getElementById('equipeNome').value = membro.nome;
+                document.getElementById('equipeFuncao').value = membro.funcao;
+                document.getElementById('equipeTurno').value = membro.turno || 'Manhã';
+                
+                const fpNascimento = document.getElementById('equipeNascimento')._flatpickr;
+                if(fpNascimento && membro.dataNascimento) {
+                    const safeDate = this._parseISODateAsLocal(membro.dataNascimento);
+                    if (safeDate) fpNascimento.setDate(safeDate, true);
+                }
+
+                document.getElementById('equipeModalTitle').textContent = 'Editar Membro da Equipe';
+                this.openModal('addEditEquipeModal');
+            },
+
+            deleteMembro(membroId) {
+                this.data.equipe = this.data.equipe.filter(m => m.id !== membroId);
+                this.saveDataToGoogleSheets();
+                this.requestRender();
+            },
+
+            confirmDeleteMembro(membroId) {
+                const membro = this.data.equipe.find(m => m.id === membroId);
+                if (!membro) return;
+                this.showConfirmModal('Excluir Membro', `Tem certeza que deseja excluir ${membro.nome}? Esta ação não pode ser desfeita.`, () => this.deleteMembro(membroId));
+            },
+
+            deletePaciente(pacienteId) {
+                this.data.pacientes = this.data.pacientes.filter(p => p.id !== pacienteId);
+                this.saveDataToGoogleSheets();
+                this.requestRender();
+            },
+
+            confirmDeletePaciente(pacienteId) {
+                const paciente = this.data.pacientes.find(p => p.id === pacienteId);
+                if (!paciente) return;
+
+                if (!paciente.dataAlta) {
+                    this.showConfirmModal(
+                        'Ação Inválida', 
+                        'Não é possível excluir um paciente que está atualmente internado. Por favor, dê alta primeiro.',
+                        () => {}
+                    );
+                    document.getElementById('confirmButton').style.display = 'none';
+                    document.getElementById('cancelButton').textContent = 'Fechar';
+                } else {
+                    this.showConfirmModal(
+                        'Excluir Paciente', 
+                        `Tem certeza que deseja excluir ${paciente.nome} do histórico? Esta ação não pode ser desfeita.`, 
+                        () => this.deletePaciente(pacienteId)
+                    );
+                }
+            },
+
+            exportarXLS() {
+                const filteredPacientes = this.data.pacientes.filter(p => {
+                    if (!p.dataAdmissao) return false;
+                    const admDate = this._parseISODateAsLocal(p.dataAdmissao);
+                    return admDate.getFullYear() === this.patientFilter.year && admDate.getMonth() === this.patientFilter.month;
+                }).map(p => {
+                       return {
+                            'Prontuário': p.prontuario,
+                            'SARAM': p.saram,
+                            'Nome': p.nome,
+                            'Data de Nascimento': this.formatDateToBR(p.dataNascimento),
+                            'Diagnóstico': p.diagnostico,
+                            'Dieta': p.dieta,
+                            'Equipe': p.equipeMedica,
+                            'Admissão': this.formatDateToBR(p.dataAdmissao),
+                            'Alta': p.dataAlta ? this.formatDateToBR(p.dataAlta) : 'Internado',
+                            'Tipo Alta': p.dataAlta ? (p.tipoAlta || 'Melhorado') : '-',
+                            'Permanência': this.calcularPermanencia(p.dataAdmissao, p.dataAlta),
+                            'Acompanhante': p.acompanhante ? 'Sim' : 'Não',
+                            'Braden': p.braden,
+                            'Morse': p.morse,
+                            'Fugulin': p.fugulin
+                        };
+                });
+                const ws = XLSX.utils.json_to_sheet(filteredPacientes);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Pacientes");
+                XLSX.writeFile(wb, `relatorio_pacientes_${this.patientFilter.year}_${this.patientFilter.month + 1}.xlsx`);
+            },
+
+            openTransferirModal(leitoIdOrigem) {
+                const leitoOrigem = this.data.leitos.find(l => l.id === leitoIdOrigem);
+                const paciente = this.data.pacientes.find(p => p.id === leitoOrigem.pacienteId);
+                if (!leitoOrigem || !paciente) return;
+
+                const leitosDisponiveis = this.data.leitos.filter(l => l.status === 'Livre');
+                
+                document.getElementById('transferirModalTitle').textContent = `Transferir ${paciente.nome}`;
+                document.getElementById('transferirLeitoIdOrigem').value = leitoIdOrigem;
+
+                const selectLeitoDestino = document.getElementById('leitoDestinoSelect');
+                if (leitosDisponiveis.length > 0) {
+                    selectLeitoDestino.innerHTML = leitosDisponiveis.map(l => `<option value="${l.id}">${l.id}</option>`).join('');
+                    selectLeitoDestino.disabled = false;
+                    document.querySelector('#transferirForm button[type="submit"]').disabled = false;
+                } else {
+                    selectLeitoDestino.innerHTML = '<option>Nenhum leito livre</option>';
+                    selectLeitoDestino.disabled = true;
+                    document.querySelector('#transferirForm button[type="submit"]').disabled = true;
+                }
+                
+                this.openModal('transferirPacienteModal');
+            },
+
+            processarTransferencia(leitoIdOrigem, leitoIdDestino) {
+                const leitoOrigem = this.data.leitos.find(l => l.id === leitoIdOrigem);
+                const leitoDestino = this.data.leitos.find(l => l.id === leitoIdDestino);
+                
+                if (leitoOrigem && leitoDestino && leitoOrigem.pacienteId) {
+                    leitoDestino.pacienteId = leitoOrigem.pacienteId;
+                    leitoDestino.status = 'Ocupado';
+                    leitoDestino.observacoes = leitoOrigem.observacoes;
+                    leitoDestino.tipoIsolamento = leitoOrigem.tipoIsolamento;
+                    leitoDestino.condicaoPaciente = leitoOrigem.condicaoPaciente;
+                    leitoDestino.necessitaFisioterapia = leitoOrigem.necessitaFisioterapia;
+                    leitoDestino.riscoNutricional = leitoOrigem.riscoNutricional;
+
+                    leitoOrigem.pacienteId = null;
+                    leitoOrigem.status = 'Livre';
+                    leitoOrigem.observacoes = '';
+                    leitoOrigem.tipoIsolamento = 'Nenhum';
+                    leitoOrigem.condicaoPaciente = 'Nenhum';
+                    leitoOrigem.necessitaFisioterapia = false;
+                    leitoOrigem.riscoNutricional = false;
+
+                    this.saveDataToGoogleSheets();
+                    this.requestRender();
+                }
+            },
+
+            openAddReservaModal() {
+                this.openModal('addReservaModal');
+                const fpReserva = document.getElementById('reservaData')._flatpickr;
+                if (fpReserva) fpReserva.setDate(new Date(), true);
+            },
+
+            deleteReserva(reservaId) {
+                this.data.reservas = this.data.reservas.filter(r => r.id !== reservaId);
+                this.saveDataToGoogleSheets();
+                this.requestRender();
+            },
+
+            confirmDeleteReserva(reservaId) {
+                const reserva = this.data.reservas.find(r => r.id === reservaId);
+                if (!reserva) return;
+                this.showConfirmModal('Excluir Reserva', `Tem certeza que deseja excluir a reserva para ${reserva.nome}?`, () => this.deleteReserva(reservaId));
+            },
+
+            openModal(modalId) { document.getElementById(modalId).style.display = 'flex'; },
+            closeModal(modalId) { document.getElementById(modalId).style.display = 'none'; },
+            changeView(view) { this.currentView = view; this.render(); },
+            changePatientFilter(offset) { this.patientFilter.month += offset; if (this.patientFilter.month > 11) { this.patientFilter.month = 0; this.patientFilter.year++; } if (this.patientFilter.month < 0) { this.patientFilter.month = 11; this.patientFilter.year--; } this.render(); },
+            setPatientFilterYear(year) { this.patientFilter.year = parseInt(year); this.render(); },
+            changeFisioterapiaFilter(offset) { this.fisioterapiaFilter.month += offset; if (this.fisioterapiaFilter.month > 11) { this.fisioterapiaFilter.month = 0; this.fisioterapiaFilter.year++; } if (this.fisioterapiaFilter.month < 0) { this.fisioterapiaFilter.month = 11; this.fisioterapiaFilter.year--; } this.render(); },
+            setFisioterapiaFilterYear(year) { this.fisioterapiaFilter.year = parseInt(year); this.render(); },
+        };
+        window.app = app;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            app.startApp();
+            flatpickr(".datepicker", { dateFormat: "d/m/Y", locale: "pt" });
+            
+            window.addEventListener('online', () => {
+                console.log("Conexão reestabelecida!");
+                if (localStorage.getItem('hospitalPanel_needsSync') === 'true') {
+                    console.log("Sincronização pendente encontrada. Enviando dados para a nuvem...");
+                    alert('Conexão reestabelecida. Sincronizando alterações pendentes com o Google Sheets.');
+                    app.performSave();
+                }
+            });
+
+            document.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const formId = e.target.id;
+
+                switch(formId) {
+                    case 'altaForm': {
+                        const leitoId = parseInt(document.getElementById('altaLeitoId').value);
+                        const tipoAlta = document.getElementById('tipoAltaSelect').value;
+                        app.processarAlta(leitoId, tipoAlta);
+                        app.closeModal('altaModal');
+                        break;
+                    }
+                    case 'admitirForm': {
+                        const leitoId = parseInt(document.getElementById('leitoIdAdmitir').value);
+                        const pacienteId = parseInt(document.getElementById('pacienteSelect').value);
+                        
+                        const leito = app.data.leitos.find(l => l.id === leitoId);
+                        const paciente = app.data.pacientes.find(p => p.id === pacienteId);
+                        if (leito && paciente) {
+                            leito.status = 'Ocupado';
+                            leito.pacienteId = pacienteId;
+                            leito.observacoes = '';
+                            leito.condicaoPaciente = 'Nenhum';
+                            leito.necessitaFisioterapia = false;
+                            leito.riscoNutricional = false;
+                            paciente.dataAdmissao = new Date().toISOString().split('T')[0];
+                            paciente.dataAlta = null;
+                            paciente.tipoAlta = null;
+                            app.saveDataToGoogleSheets();
+                            app.requestRender();
+                        }
+                        app.closeModal('admitirPacienteModal');
+                        break;
+                    }
+
+                    case 'transferirForm': {
+                        const leitoIdOrigem = parseInt(document.getElementById('transferirLeitoIdOrigem').value);
+                        const leitoIdDestino = parseInt(document.getElementById('leitoDestinoSelect').value);
+                        if (leitoIdOrigem && leitoIdDestino) {
+                            app.processarTransferencia(leitoIdOrigem, leitoIdDestino);
+                        }
+                        app.closeModal('transferirPacienteModal');
+                        break;
+                    }
+
+                    // INÍCIO: LÓGICA DE SALVAMENTO DO EDITAR LEITO MODIFICADA
+                    case 'editLeitoForm': {
+                        const leitoId = parseInt(document.getElementById('editLeitoId').value);
+                        const leitoIndex = app.data.leitos.findIndex(l => l.id === leitoId);
+                        if (leitoIndex === -1) return;
+
+                        const leito = app.data.leitos[leitoIndex];
+                        const newStatus = document.getElementById('editLeitoStatus').value;
+                        const isOccupied = newStatus === 'Ocupado' || newStatus === 'Em Exame' || newStatus === 'Em Cirurgia';
+
+                        // Atualiza os dados do leito
+                        leito.status = newStatus;
+                        leito.observacoes = document.getElementById('editLeitoObservacoes').value;
+                        leito.tipoIsolamento = document.getElementById('editLeitoTipoIsolamento').value;
+
+                        if (isOccupied) {
+                            leito.condicaoPaciente = document.getElementById('editCondicaoPaciente').value;
+                            leito.necessitaFisioterapia = document.getElementById('editFisioterapia').checked;
+                            leito.riscoNutricional = document.getElementById('editRiscoNutricional').checked;
+                            
+                            // Atualiza a dieta do paciente associado
+                            const pacienteIndex = app.data.pacientes.findIndex(p => p.id === leito.pacienteId);
+                            if (pacienteIndex !== -1) {
+                                app.data.pacientes[pacienteIndex].dieta = document.getElementById('editPacienteDieta').value;
+                            }
+                        } else {
+                            leito.condicaoPaciente = 'Nenhum';
+                            leito.necessitaFisioterapia = false;
+                            leito.riscoNutricional = false;
+                        }
+
+                        app.saveDataToGoogleSheets();
+                        app.requestRender();
+                        app.closeModal('editLeitoModal');
+                        break;
+                    }
+                    // FIM: LÓGICA DE SALVAMENTO DO EDITAR LEITO MODIFICADA
+
+                    case 'addPacienteForm': {
+                        const pacienteIdStr = document.getElementById('pacienteId').value;
+                        const pacienteData = {
+                            nome: document.getElementById('pacienteNome').value, prontuario: document.getElementById('pacienteProntuario').value,
+                            saram: document.getElementById('pacienteSaram').value, sexo: document.getElementById('pacienteSexo').value,
+                            equipeMedica: document.getElementById('pacienteEquipe').value,
+                            dieta: document.getElementById('pacienteDieta').value,
+                            dataNascimento: app.formatDateToISO(document.getElementById('pacienteNascimento').value),
+                            dataAdmissao: app.formatDateToISO(document.getElementById('pacienteAdmissao').value),
+                            acompanhante: document.getElementById('pacienteAcompanhante').checked, diagnostico: document.getElementById('pacienteDiagnostico').value,
+                            alergias: document.getElementById('pacienteAlergias').value, 
+                            braden: parseInt(document.getElementById('pacienteBraden').value) || 0,
+                            morse: parseInt(document.getElementById('pacienteMorse').value) || 0,
+                            fugulin: parseInt(document.getElementById('pacienteFugulin').value) || 0,
+                        };
+
+                        if (pacienteIdStr) { // Edição
+                            const pacienteId = parseInt(pacienteIdStr);
+                            const index = app.data.pacientes.findIndex(p => p.id === pacienteId);
+                            if (index !== -1) {
+                                const originalPaciente = app.data.pacientes[index];
+                                app.data.pacientes[index] = { ...originalPaciente, ...pacienteData };
+                            }
+                        } else { // Adição
+                            const newId = app.generateNewId(app.data.pacientes);
+                            const newPaciente = { ...pacienteData, id: newId, dataAlta: null, tipoAlta: null };
+                            app.data.pacientes.push(newPaciente);
+                        }
+                        
+                        app.saveDataToGoogleSheets();
+                        app.requestRender();
+                        app.closeModal('addPacienteModal');
+                        break;
+                    }
+                    
+                    case 'addEditEquipeForm': {
+                        const membroIdStr = document.getElementById('equipeMembroId').value;
+                        const membroData = {
+                            nome: document.getElementById('equipeNome').value, funcao: document.getElementById('equipeFuncao').value,
+                            turno: document.getElementById('equipeTurno').value, 
+                            dataNascimento: app.formatDateToISO(document.getElementById('equipeNascimento').value),
+                        };
+                        
+                        if (membroIdStr) {
+                            const membroId = parseInt(membroIdStr);
+                            const index = app.data.equipe.findIndex(m => m.id === membroId);
+                            if (index !== -1) {
+                                app.data.equipe[index] = { ...app.data.equipe[index], ...membroData };
+                            }
+                        } else {
+                            const newId = app.generateNewId(app.data.equipe);
+                            app.data.equipe.push({ ...membroData, id: newId });
+                        }
+                        app.saveDataToGoogleSheets();
+                        app.requestRender();
+                        app.closeModal('addEditEquipeModal');
+                        break;
+                    }
+
+                    case 'addReservaForm': {
+                        const newReserva = {
+                            id: Date.now(),
+                            data: app.formatDateToISO(document.getElementById('reservaData').value),
+                            nome: document.getElementById('reservaNome').value,
+                            motivo: document.getElementById('reservaMotivo').value,
+                        };
+
+                        if(!app.data.reservas) app.data.reservas = [];
+                        app.data.reservas.push(newReserva);
+                        app.saveDataToGoogleSheets();
+                        app.requestRender();
+                        app.closeModal('addReservaModal');
+                        break;
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

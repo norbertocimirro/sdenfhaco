@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, Calendar, Activity, Home, AlertCircle, Check, ChevronRight, ChevronLeft, 
-  Clipboard, Copy, Save, Loader2, List, Search, Lock, Key, Eye, EyeOff,
+  Clipboard, Copy, Save, Loader2, List, Search, ArrowLeft, Lock, Key, Eye, EyeOff,
   Trash2, Archive, RefreshCcw, Plus, X, Camera, ChevronDown, ChevronUp, Image as ImageIcon,
-  FileSpreadsheet, ArrowLeft
+  FileSpreadsheet, MapPin, Maximize2
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -19,11 +19,15 @@ const myRealFirebaseConfig = {
   appId: "1:142640845534:web:580207dbbca7b805c3a84f"
 };
 
+// Usa a config real se não estiver no ambiente de teste da IA
 const firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : myRealFirebaseConfig;
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'haco-comissao-pele-v1';
+
+// --- NOME DA COLEÇÃO NO BANCO DE DADOS (Caminho Simplificado) ---
+const COLLECTION_NAME = 'prontuarios_haco';
 
 const App = () => {
   const [view, setView] = useState('form'); 
@@ -35,7 +39,7 @@ const App = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [user, setUser] = useState(null);
-  const [authStatus, setAuthStatus] = useState('...');
+  const [authStatus, setAuthStatus] = useState('Conectando...');
   
   const [records, setRecords] = useState([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(false);
@@ -64,10 +68,10 @@ const App = () => {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (error) { console.error(error); setAuthStatus('Erro'); }
+      } catch (error) { console.error(error); setAuthStatus('Erro Auth'); }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setAuthStatus(u ? 'Online' : 'Offline'); });
+    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setAuthStatus(u ? 'Conectado' : 'Offline'); });
     return () => unsubscribe();
   }, []);
 
@@ -100,7 +104,7 @@ const App = () => {
   };
 
   const nextStep = () => { 
-    if (step === 4 && formData.lesoes.length === 0) { alert("Adicione pelo menos uma lesão."); return; }
+    if (step === 4 && formData.lesoes.length === 0) { alert("Adicione uma lesão."); return; }
     if (step < totalSteps) { setStep(step + 1); document.getElementById('form-scroll-container')?.scrollTo({ top: 0, behavior: 'smooth' }); }
   };
   const prevStep = () => { if (step > 1) setStep(step - 1); };
@@ -114,31 +118,45 @@ const App = () => {
 
   const handleFinalize = async () => {
     if (!user) { alert("Sem conexão."); return; }
-    if (!formData.nome || !formData.responsavel) { alert("Nome e Responsável são obrigatórios."); return; }
+    if (!formData.nome || !formData.responsavel) { alert("Campos obrigatórios vazios."); return; }
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes'), {
+      // Salva na coleção simplificada 'prontuarios_haco'
+      await addDoc(collection(db, COLLECTION_NAME), {
         ...formData, dataRegistro: new Date().toISOString(), userId: user.uid, archived: false
       });
       setIsSubmitting(false); setIsSuccess(true);
-    } catch (error) { setIsSubmitting(false); alert("Erro ao salvar."); }
+    } catch (error) { 
+      setIsSubmitting(false); 
+      console.error(error);
+      alert("Erro ao salvar: Verifique as Permissões no Firebase."); 
+    }
   };
 
   const fetchRecords = async () => {
     if (!user) return;
     setIsLoadingRecords(true);
     try {
-      const qs = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes'));
+      // Busca na coleção simplificada
+      const qs = await getDocs(collection(db, COLLECTION_NAME));
       const data = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Ordenação
       data.sort((a, b) => new Date(b.dataRegistro || 0) - new Date(a.dataRegistro || 0));
+      
       setRecords(data);
-    } catch (e) { alert("Erro ao ler."); } finally { setIsLoadingRecords(false); }
+      if (data.length === 0) console.log("Nenhum registro encontrado na coleção:", COLLECTION_NAME);
+      
+    } catch (e) { 
+      console.error("Erro fetch:", e);
+      alert("Erro de Permissão: O aplicativo não consegue ler o banco. Verifique as 'Rules' no Firebase."); 
+    } finally { setIsLoadingRecords(false); }
   };
 
   const handleArchiveRecord = async (id, status) => {
     if (!confirm(status ? "Arquivar?" : "Restaurar?")) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes', id), { archived: status });
+      await updateDoc(doc(db, COLLECTION_NAME, id), { archived: status });
       setRecords(prev => prev.map(r => r.id === id ? { ...r, archived: status } : r));
     } catch (e) { alert("Erro ao atualizar."); }
   };
@@ -146,7 +164,7 @@ const App = () => {
   const handleDeleteRecord = async (id) => {
     if (!confirm("Excluir permanentemente?")) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes', id));
+      await deleteDoc(doc(db, COLLECTION_NAME, id));
       setRecords(prev => prev.filter(r => r.id !== id));
     } catch (e) { alert("Erro ao excluir."); }
   };
@@ -170,10 +188,12 @@ const App = () => {
 
   const filteredRecords = records.filter(rec => {
     const match = rec.nome?.toLowerCase().includes(searchTerm.toLowerCase()) || rec.saram?.includes(searchTerm);
-    return match && (showArchived ? rec.archived : !rec.archived);
+    // Se 'archived' não existir (registros antigos), considera como false (ativo)
+    const isArchived = !!rec.archived;
+    return match && (showArchived ? isArchived : !isArchived);
   });
 
-  // --- COMPONENTES VISUAIS (App Style) ---
+  // --- COMPONENTES VISUAIS ---
   const InputGroup = ({ label, children }) => (
     <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-3">
       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">{label}</label>
@@ -202,7 +222,6 @@ const App = () => {
       case 1: return (
         <div className="animate-fade-in space-y-2">
           <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Identificação</h2>
-          
           <InputGroup label="Dados Pessoais">
             <AppInput placeholder="Nome Completo" value={formData.nome} onChange={e=>handleChange('nome', e.target.value)} />
             <div className="mt-3">
@@ -210,25 +229,16 @@ const App = () => {
               <AppInput type="date" value={formData.nascimento} onChange={e=>handleChange('nascimento', e.target.value)} />
             </div>
           </InputGroup>
-
           <InputGroup label="Dados Militares / Hospitalares">
             <div className="grid grid-cols-2 gap-4">
               <AppInput type="tel" placeholder="SARAM" value={formData.saram} onChange={e=>handleChange('saram', e.target.value)} />
               <AppInput type="tel" placeholder="Prontuário" value={formData.prontuario} onChange={e=>handleChange('prontuario', e.target.value)} />
             </div>
           </InputGroup>
-
           <InputGroup label="Origem da Solicitação">
             <div className="grid grid-cols-3 gap-2">
               {['UPI','UTI','UPA','UCC','SAD','CAIS'].map(opt => (
-                <button 
-                  key={opt}
-                  type="button"
-                  onClick={()=>handleChange('origem', opt)}
-                  className={`py-3 rounded-xl text-sm font-bold transition-all ${formData.origem === opt ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
-                >
-                  {opt}
-                </button>
+                <button key={opt} type="button" onClick={()=>handleChange('origem', opt)} className={`py-3 rounded-xl text-sm font-bold transition-all ${formData.origem === opt ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>{opt}</button>
               ))}
             </div>
           </InputGroup>
@@ -237,7 +247,6 @@ const App = () => {
       case 2: return (
         <div className="animate-fade-in space-y-2">
           <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Clínicos</h2>
-          
           <InputGroup label="Comorbidades">
             <div className="grid grid-cols-2 gap-2 mb-3">
               {['HAS','DM','D. Arterial','D. Venosa','Neoplasia'].map(i => (
@@ -246,11 +255,10 @@ const App = () => {
             </div>
             <AppInput placeholder="Outra comorbidade..." value={formData.outraComorbidade} onChange={e=>handleChange('outraComorbidade', e.target.value)} />
           </InputGroup>
-
           <InputGroup label="Histórico">
             <div className="space-y-4">
-              <textarea rows="2" placeholder="Medicações de uso contínuo..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.medicacoes} onChange={e=>handleChange('medicacoes', e.target.value)} />
-              <textarea rows="2" placeholder="Histórico de cirurgias..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.cirurgias} onChange={e=>handleChange('cirurgias', e.target.value)} />
+              <textarea rows="2" placeholder="Medicações..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.medicacoes} onChange={e=>handleChange('medicacoes', e.target.value)} />
+              <textarea rows="2" placeholder="Cirurgias..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.cirurgias} onChange={e=>handleChange('cirurgias', e.target.value)} />
             </div>
           </InputGroup>
         </div>
@@ -258,34 +266,20 @@ const App = () => {
       case 3: return (
         <div className="animate-fade-in space-y-2">
           <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Sociais</h2>
-          
           <InputGroup label="Suporte Domiciliar">
             <p className="text-sm text-slate-600 mb-3">Possui cuidador apto?</p>
-            <div className="flex gap-2">
-              {['Sim', 'Não'].map(opt => (
-                <button key={opt} type="button" onClick={()=>handleChange('temCuidador', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.temCuidador===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>
-              ))}
-            </div>
+            <div className="flex gap-2">{['Sim', 'Não'].map(opt => (<button key={opt} type="button" onClick={()=>handleChange('temCuidador', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.temCuidador===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>))}</div>
           </InputGroup>
-
           <InputGroup label="Acompanhamento">
             <p className="text-sm text-slate-600 mb-3">Acomp. Ambulatorial?</p>
-            <div className="flex gap-2 mb-4">
-              {['Sim', 'Não'].map(opt => (
-                <button key={opt} type="button" onClick={()=>handleChange('acompanhamentoAmbu', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.acompanhamentoAmbu===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>
-              ))}
-            </div>
-            {formData.acompanhamentoAmbu === 'Sim' && (
-              <AppInput placeholder="Qual especialista?" value={formData.especialistaAmbu} onChange={e=>handleChange('especialistaAmbu',e.target.value)} />
-            )}
+            <div className="flex gap-2 mb-4">{['Sim', 'Não'].map(opt => (<button key={opt} type="button" onClick={()=>handleChange('acompanhamentoAmbu', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.acompanhamentoAmbu===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>))}</div>
+            {formData.acompanhamentoAmbu === 'Sim' && (<AppInput placeholder="Qual especialista?" value={formData.especialistaAmbu} onChange={e=>handleChange('especialistaAmbu',e.target.value)} />)}
           </InputGroup>
         </div>
       );
       case 4: return (
         <div className="animate-fade-in space-y-4">
           <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Registro de Lesões</h2>
-          
-          {/* Lista de Lesões - Estilo Card Horizontal */}
           {formData.lesoes.length > 0 && (
             <div className="flex overflow-x-auto gap-3 pb-2 -mx-4 px-4 snap-x hide-scrollbar">
               {formData.lesoes.map((lesao, idx) => (
@@ -293,109 +287,34 @@ const App = () => {
                   <div className="h-16 w-16 bg-slate-100 rounded-xl overflow-hidden shrink-0">
                     {lesao.foto ? <img src={lesao.foto} className="h-full w-full object-cover" /> : <div className="h-full w-full flex items-center justify-center text-slate-300"><ImageIcon size={20}/></div>}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-800 text-sm truncate">{lesao.localizacao}</p>
-                    <p className="text-xs text-slate-500 truncate">{lesao.etiologia}</p>
-                    <p className="text-[10px] font-bold text-blue-600 mt-1 bg-blue-50 inline-block px-1.5 rounded">{lesao.medida}</p>
-                  </div>
+                  <div className="flex-1 min-w-0"><p className="font-bold text-slate-800 text-sm truncate">{lesao.localizacao}</p><p className="text-xs text-slate-500 truncate">{lesao.etiologia}</p><p className="text-[10px] font-bold text-blue-600 mt-1 bg-blue-50 inline-block px-1.5 rounded">{lesao.medida}</p></div>
                   <button onClick={() => removeLesion(lesao.id)} className="text-slate-300 hover:text-red-500"><X size={20}/></button>
                 </div>
               ))}
             </div>
           )}
-
-          {/* Form Nova Lesão */}
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nova Lesão</span>
-              <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">#{formData.lesoes.length + 1}</span>
-            </div>
-            
+            <div className="flex justify-between items-center mb-4"><span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nova Lesão</span><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">#{formData.lesoes.length + 1}</span></div>
             <div className="space-y-4">
               <AppInput placeholder="Localização (ex: Sacral)" value={currentLesion.localizacao} onChange={e=>handleLesionChange('localizacao', e.target.value)} />
-              
-              <div className="relative">
-                <select 
-                  className="w-full appearance-none bg-slate-50 p-3 rounded-xl text-sm font-medium text-slate-700 outline-none"
-                  value={currentLesion.etiologia} 
-                  onChange={e=>handleLesionChange('etiologia', e.target.value)}
-                >
-                  <option value="">Selecione a Etiologia...</option>
-                  <option value="Lesão por pressão">Lesão por pressão (LPP)</option>
-                  <option value="Lesão arterial">Lesão arterial</option>
-                  <option value="Lesão venosa">Lesão venosa</option>
-                  <option value="Queimadura">Queimadura</option>
-                  <option value="Deiscência Cirúrgica">Deiscência Cirúrgica</option>
-                  <option value="Outro">Outro</option>
-                </select>
-                <ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16}/>
-              </div>
-
-              {currentLesion.etiologia === 'Lesão por pressão' && (
-                <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
-                  <label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Classificação NPUAP</label>
-                  <select className="w-full bg-white p-2 rounded-lg text-sm text-slate-700 outline-none" value={currentLesion.estagio} onChange={e=>handleLesionChange('estagio', e.target.value)}>
-                    <option value="">Selecione o estágio...</option>
-                    <option value="Estágio 1">Estágio 1</option>
-                    <option value="Estágio 2">Estágio 2</option>
-                    <option value="Estágio 3">Estágio 3</option>
-                    <option value="Estágio 4">Estágio 4</option>
-                    <option value="Não Classificável">Não Classificável</option>
-                    <option value="Tecidos Profundos">Tecidos Profundos</option>
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <AppInput placeholder="Medidas (CxLxP)" value={currentLesion.medida} onChange={e=>handleLesionChange('medida', e.target.value)} />
-                <AppInput placeholder="Tempo (dias)" value={currentLesion.tempoEvolucao} onChange={e=>handleLesionChange('tempoEvolucao', e.target.value)} />
-              </div>
-
-              <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer active:bg-slate-100 transition-colors">
-                <div className="h-10 w-10 bg-white rounded-full flex items-center justify-center text-blue-500 shadow-sm border border-slate-100">
-                  <Camera size={20}/>
-                </div>
-                <div className="flex-1">
-                  <span className="text-sm font-bold text-slate-700 block">{currentLesion.foto ? 'Foto Anexada' : 'Tirar Foto'}</span>
-                  <span className="text-[10px] text-slate-400 block">{currentLesion.foto ? 'Toque para trocar' : 'Opcional'}</span>
-                </div>
-                <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-                {currentLesion.foto && <div className="h-10 w-10 rounded-lg overflow-hidden border border-white shadow-sm"><img src={currentLesion.foto} className="w-full h-full object-cover"/></div>}
-              </label>
-
-              <button type="button" onClick={addLesion} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform">
-                <Plus size={20}/> Salvar Lesão
-              </button>
+              <div className="relative"><select className="w-full appearance-none bg-slate-50 p-3 rounded-xl text-sm font-medium text-slate-700 outline-none" value={currentLesion.etiologia} onChange={e=>handleLesionChange('etiologia', e.target.value)}><option value="">Selecione a Etiologia...</option><option value="Lesão por pressão">Lesão por pressão (LPP)</option><option value="Lesão arterial">Lesão arterial</option><option value="Lesão venosa">Lesão venosa</option><option value="Queimadura">Queimadura</option><option value="Deiscência Cirúrgica">Deiscência</option><option value="Outro">Outro</option></select><ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16}/></div>
+              {currentLesion.etiologia === 'Lesão por pressão' && (<div className="bg-orange-50 p-3 rounded-xl border border-orange-100"><label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Classificação NPUAP</label><select className="w-full bg-white p-2 rounded-lg text-sm text-slate-700 outline-none" value={currentLesion.estagio} onChange={e=>handleLesionChange('estagio', e.target.value)}><option value="">Selecione...</option><option value="Estágio 1">Estágio 1</option><option value="Estágio 2">Estágio 2</option><option value="Estágio 3">Estágio 3</option><option value="Estágio 4">Estágio 4</option><option value="Não Classificável">Não Classificável</option><option value="Tecidos Profundos">Tecidos Profundos</option></select></div>)}
+              <div className="grid grid-cols-2 gap-3"><AppInput placeholder="Medidas (CxLxP)" value={currentLesion.medida} onChange={e=>handleLesionChange('medida', e.target.value)} /><AppInput placeholder="Tempo (dias)" value={currentLesion.tempoEvolucao} onChange={e=>handleLesionChange('tempoEvolucao', e.target.value)} /></div>
+              <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer active:bg-slate-100 transition-colors"><div className="h-10 w-10 bg-white rounded-full flex items-center justify-center text-blue-500 shadow-sm border border-slate-100"><Camera size={20}/></div><div className="flex-1"><span className="text-sm font-bold text-slate-700 block">{currentLesion.foto ? 'Foto Anexada' : 'Tirar Foto'}</span><span className="text-[10px] text-slate-400 block">{currentLesion.foto ? 'Toque para trocar' : 'Opcional'}</span></div><input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />{currentLesion.foto && <div className="h-10 w-10 rounded-lg overflow-hidden border border-white shadow-sm"><img src={currentLesion.foto} className="w-full h-full object-cover"/></div>}</label>
+              <button type="button" onClick={addLesion} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"><Plus size={20}/> Salvar Lesão</button>
             </div>
           </div>
-
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Condutas / Cuidados</label>
-            <textarea rows="3" className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" placeholder="Descreva os curativos e condutas..." value={formData.condutasPrevias} onChange={e=>handleChange('condutasPrevias',e.target.value)} />
-          </div>
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Condutas / Cuidados</label><textarea rows="3" className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" placeholder="Descreva os curativos e condutas..." value={formData.condutasPrevias} onChange={e=>handleChange('condutasPrevias',e.target.value)} /></div>
         </div>
       );
       case 5: return (
         <div className="animate-fade-in space-y-6 pt-4 text-center">
           <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto text-blue-600 mb-2 shadow-sm"><Stethoscope size={36}/></div>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Resumo Final</h2>
-            <p className="text-slate-500 text-sm">Confira os dados antes de enviar.</p>
-          </div>
-          
+          <div><h2 className="text-2xl font-bold text-slate-900">Resumo Final</h2><p className="text-slate-500 text-sm">Confira os dados antes de enviar.</p></div>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-left space-y-4">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-50">
-              <span className="text-xs font-bold text-slate-400 uppercase">Paciente</span>
-              <span className="font-bold text-slate-800">{formData.nome}</span>
-            </div>
-            <div className="flex justify-between items-center pb-3 border-b border-slate-50">
-              <span className="text-xs font-bold text-slate-400 uppercase">Lesões</span>
-              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{formData.lesoes.length} registradas</span>
-            </div>
-            <div>
-              <span className="text-xs font-bold text-slate-400 uppercase mb-2 block">Seu Nome (Responsável)</span>
-              <input type="text" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Digite seu nome..." value={formData.responsavel} onChange={e=>handleChange('responsavel',e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.preventDefault()}}/>
-            </div>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-50"><span className="text-xs font-bold text-slate-400 uppercase">Paciente</span><span className="font-bold text-slate-800">{formData.nome}</span></div>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-50"><span className="text-xs font-bold text-slate-400 uppercase">Lesões</span><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{formData.lesoes.length} registradas</span></div>
+            <div><span className="text-xs font-bold text-slate-400 uppercase mb-2 block">Seu Nome (Responsável)</span><input type="text" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Digite seu nome..." value={formData.responsavel} onChange={e=>handleChange('responsavel',e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.preventDefault()}}/></div>
           </div>
         </div>
       );
@@ -417,12 +336,9 @@ const App = () => {
     );
   }
 
-  // --- RENDERIZAÇÃO PRINCIPAL (LAYOUT MOBILE) ---
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 flex justify-center">
       <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative flex flex-col">
-        
-        {/* HEADER FLUTUANTE */}
         <div className="bg-white/90 backdrop-blur-md sticky top-0 z-50 px-5 py-4 flex justify-between items-center border-b border-slate-50">
           <div><h1 className="font-bold text-xl text-slate-800 tracking-tight">Comissão Pele</h1><p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">HACO</p></div>
           <button onClick={() => { if(view==='form'){ if(isAdminLoggedIn) setView('list'); else setView('login'); } else setView('form'); }} className="h-10 w-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">{view==='form'?<Lock size={18}/>:<ArrowLeft size={18}/>}</button>
@@ -488,6 +404,7 @@ const App = () => {
                     )}
                  </div>
                ))}
+               {filteredRecords.length === 0 && <div className="text-center py-10 text-slate-400 flex flex-col items-center gap-2"><Search size={30}/><p>Nenhum registro.</p></div>}
             </div>
           </div>
         )}
@@ -498,8 +415,6 @@ const App = () => {
                <StepIndicator />
                <form onSubmit={e=>e.preventDefault()}>{renderFormStep()}</form>
             </div>
-            
-            {/* RODAPÉ DE NAVEGAÇÃO FIXO */}
             <div className="absolute bottom-0 w-full bg-white border-t border-slate-100 p-4 pb-8 flex gap-3 z-30 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
                <button onClick={prevStep} disabled={step===1} className={`h-14 w-14 rounded-2xl flex items-center justify-center transition-all ${step===1 ? 'text-slate-200 bg-slate-50' : 'text-slate-600 bg-slate-100 active:scale-95'}`}><ChevronLeft size={24}/></button>
                {step < totalSteps ? (

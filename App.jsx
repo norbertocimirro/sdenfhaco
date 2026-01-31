@@ -101,7 +101,7 @@ const App = () => {
 
   const nextStep = () => { 
     if (step === 4 && formData.lesoes.length === 0) { alert("Adicione pelo menos uma lesão."); return; }
-    if (step < totalSteps) { setStep(step + 1); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    if (step < totalSteps) { setStep(step + 1); document.getElementById('form-scroll-container')?.scrollTo({ top: 0, behavior: 'smooth' }); }
   };
   const prevStep = () => { if (step > 1) setStep(step - 1); };
 
@@ -188,14 +188,8 @@ const App = () => {
     />
   );
 
-  const AppSelect = ({ options, ...props }) => (
-    <select className="w-full text-base font-medium text-slate-900 bg-transparent h-10 outline-none border-b border-slate-100 focus:border-blue-500" {...props}>
-      {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-    </select>
-  );
-
   const StepIndicator = () => (
-    <div className="flex items-center gap-1 mb-6 px-1">
+    <div className="flex items-center gap-1 mb-4 px-1">
       {[1,2,3,4,5].map(s => (
         <div key={s} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${s <= step ? 'bg-blue-600' : 'bg-slate-200'}`} />
       ))}
@@ -207,7 +201,7 @@ const App = () => {
     switch(step) {
       case 1: return (
         <div className="animate-fade-in space-y-2">
-          <h2 className="text-xl font-bold text-slate-900 px-1 mb-4">Identificação</h2>
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Identificação</h2>
           
           <InputGroup label="Dados Pessoais">
             <AppInput placeholder="Nome Completo" value={formData.nome} onChange={e=>handleChange('nome', e.target.value)} />
@@ -242,7 +236,7 @@ const App = () => {
       );
       case 2: return (
         <div className="animate-fade-in space-y-2">
-          <h2 className="text-xl font-bold text-slate-900 px-1 mb-4">Dados Clínicos</h2>
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Clínicos</h2>
           
           <InputGroup label="Comorbidades">
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -263,7 +257,7 @@ const App = () => {
       );
       case 3: return (
         <div className="animate-fade-in space-y-2">
-          <h2 className="text-xl font-bold text-slate-900 px-1 mb-4">Dados Sociais</h2>
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Sociais</h2>
           
           <InputGroup label="Suporte Domiciliar">
             <p className="text-sm text-slate-600 mb-3">Possui cuidador apto?</p>
@@ -500,7 +494,7 @@ const App = () => {
 
         {view === 'form' && (
           <div className="flex-1 flex flex-col relative bg-slate-50">
-            <div className="p-5 flex-1 overflow-y-auto pb-32"> 
+            <div id="form-scroll-container" className="p-5 flex-1 overflow-y-auto pb-28"> 
                <StepIndicator />
                <form onSubmit={e=>e.preventDefault()}>{renderFormStep()}</form>
             </div>

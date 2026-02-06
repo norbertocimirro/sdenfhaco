@@ -340,7 +340,7 @@ const App = () => {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 flex justify-center">
       <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative flex flex-col">
         <div className="bg-white/90 backdrop-blur-md sticky top-0 z-50 px-5 py-4 flex justify-between items-center border-b border-slate-50">
-          <div><h1 className="font-bold text-xl text-slate-800 tracking-tight">Comissão Pele</h1><p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">HACO</p></div>
+          <div><h1 className="font-bold text-xl text-slate-800 tracking-tight">Comissão de Prevenção de Lesões de Pele</h1><p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Hospital de Aeronáutica de Canoas</p></div>
           <button onClick={() => { if(view==='form'){ if(isAdminLoggedIn) setView('list'); else setView('login'); } else setView('form'); }} className="h-10 w-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">{view==='form'?<Lock size={18}/>:<ArrowLeft size={18}/>}</button>
         </div>
 

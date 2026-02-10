@@ -1,167 +1,97 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  User, Calendar, FileText, Activity, Pill, Scissors, 
-  Home, Stethoscope, AlertCircle, Check, ChevronRight, ChevronLeft, 
-  Clipboard, Copy, Save, Loader2, List, Search, ArrowLeft, Lock, Key, Eye, EyeOff,
+  User, Calendar, Activity, Home, AlertCircle, Check, ChevronRight, ChevronLeft, 
+  Clipboard, Copy, Save, Loader2, List, Search, Lock, 
   Trash2, Archive, RefreshCcw, Plus, X, Camera, ChevronDown, ChevronUp, Image as ImageIcon,
-  Download, FileSpreadsheet, Database
+  FileSpreadsheet, Stethoscope, ArrowLeft, LogOut, ExternalLink
 } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 
-// --- ÁREA DE CONFIGURAÇÃO (ATENÇÃO GESTOR) ---
-// Quando você colocar este código no GitHub ou Vercel,
-// preencha os dados abaixo com as chaves do SEU projeto Firebase.
-// Você consegue isso em: console.firebase.google.com > Configurações do Projeto
-const myRealFirebaseConfig = {
-  apiKey: "AIzaSyDrL5MNSRkPsCOkKTPT-aD5EpHV7158cFI",
-  authDomain: "lpphaco.firebaseapp.com",
-  projectId: "lpphaco",
-  storageBucket: "lpphaco.firebasestorage.app",
-  messagingSenderId: "142640845534",
-  appId: "1:142640845534:web:580207dbbca7b805c3a84f"
-};
+// --- CONFIGURAÇÃO ---
+// ⚠️ COLE AQUI A URL QUE VOCÊ COPIOU DO GOOGLE APPS SCRIPT ⚠️
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwkn9H7eV4cngRJVbB6mVGYRcoClJ1XA-IiIdO8G-pnh7rjcpU9pIkVt-bbBYt1IRtX/exec"; 
 
-// Lógica inteligente: Usa a config do ambiente de teste se existir, 
-// senão usa a sua config real (para quando for pro GitHub)
-const firebaseConfig = (typeof __firebase_config !== 'undefined') 
-  ? JSON.parse(__firebase_config) 
-  : myRealFirebaseConfig;
+// --- COMPONENTES VISUAIS (Fora do App para não travar a digitação) ---
+const InputGroup = ({ label, children }) => (
+  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-3">
+    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">{label}</label>
+    {children}
+  </div>
+);
 
-// Inicialização do Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-// No seu ambiente real, o appId pode ser fixo (ex: 'haco-pele')
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'haco-comissao-pele';
+const AppInput = (props) => (
+  <input 
+    className="w-full text-base font-medium text-slate-900 placeholder:text-slate-300 outline-none bg-transparent h-10 border-b border-slate-100 focus:border-blue-500 transition-colors"
+    {...props}
+  />
+);
 
+const StepIndicator = ({ step }) => (
+  <div className="flex items-center gap-1 mb-4 px-1">
+    {[1,2,3,4,5].map(s => (
+      <div key={s} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${s <= step ? 'bg-blue-600' : 'bg-slate-200'}`} />
+    ))}
+  </div>
+);
+
+// --- APP PRINCIPAL ---
 const App = () => {
-  // Estados de Navegação e Auth
+  // Estados de Navegação
   const [view, setView] = useState('form'); 
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [loginData, setLoginData] = useState({ user: '', pass: '' });
   const [loginError, setLoginError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   
-  // Estados Gerais
+  // Estados do Formulário
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authStatus, setAuthStatus] = useState('Conectando...');
   
-  // Estados Dashboard
+  // Estados da Gestão (Admin)
   const [records, setRecords] = useState([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState(null);
 
-  // --- ESTADO DO FORMULÁRIO (PACIENTE) ---
   const [formData, setFormData] = useState({
-    nome: '',
-    nascimento: '',
-    saram: '',
-    prontuario: '',
-    origem: '',
-    comorbidades: [],
-    outraComorbidade: '',
-    medicacoes: '',
-    cirurgias: '',
-    temCuidador: '',
-    acompanhamentoAmbu: '',
-    especialistaAmbu: '',
-    lesoes: [], // ARRAY DE LESÕES
-    condutasPrevias: '', 
-    responsavel: ''
+    nome: '', nascimento: '', saram: '', prontuario: '', origem: '',
+    comorbidades: [], outraComorbidade: '', medicacoes: '', cirurgias: '',
+    temCuidador: '', acompanhamentoAmbu: '', especialistaAmbu: '',
+    lesoes: [], condutasPrevias: '', responsavel: ''
   });
 
-  // --- ESTADO TEMPORÁRIO DA LESÃO ATUAL ---
   const [currentLesion, setCurrentLesion] = useState({
-    localizacao: '',
-    etiologia: '',
-    estagio: '', 
-    medida: '',
-    tempoEvolucao: '',
-    foto: null
+    localizacao: '', etiologia: '', estagio: '', medida: '', tempoEvolucao: '', foto: null
   });
 
   const totalSteps = 5;
 
-  // Autenticação
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        // Tenta usar token do ambiente de teste
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          // No seu ambiente real (GitHub), isso criará um usuário anônimo
-          // Idealmente, no futuro, você ativará Login por Email no Firebase
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-        setAuthStatus('Erro Conexão');
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setAuthStatus(u ? 'Conectado' : 'Aguardando...');
-    });
-    return () => unsubscribe();
-  }, []);
-
   // --- HANDLERS ---
-  const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleLesionChange = (field, value) => {
-    setCurrentLesion(prev => ({ ...prev, [field]: value }));
-  };
+  const handleChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
+  const handleLesionChange = (field, value) => setCurrentLesion(prev => ({ ...prev, [field]: value }));
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 700 * 1024) {
-      alert("A imagem é muito grande. Por favor, use uma imagem menor que 700KB.");
+    // Limite para não estourar o tempo do script
+    if (file.size > 3 * 1024 * 1024) { 
+      alert("Imagem muito grande. Use uma menor que 3MB.");
       return;
     }
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setCurrentLesion(prev => ({ ...prev, foto: reader.result }));
-    };
+    reader.onloadend = () => setCurrentLesion(prev => ({ ...prev, foto: reader.result }));
     reader.readAsDataURL(file);
   };
 
   const addLesion = () => {
     if (!currentLesion.localizacao || !currentLesion.etiologia || !currentLesion.medida) {
-      alert("Preencha Localização, Etiologia e Medidas para adicionar a lesão.");
+      alert("Preencha Localização, Etiologia e Medidas.");
       return;
     }
-    setFormData(prev => ({
-      ...prev,
-      lesoes: [...prev.lesoes, { ...currentLesion, id: Date.now() }]
-    }));
-    setCurrentLesion({
-      localizacao: '',
-      etiologia: '',
-      estagio: '',
-      medida: '',
-      tempoEvolucao: '',
-      foto: null
-    });
+    setFormData(prev => ({ ...prev, lesoes: [...prev.lesoes, { ...currentLesion, id: Date.now() }] }));
+    setCurrentLesion({ localizacao: '', etiologia: '', estagio: '', medida: '', tempoEvolucao: '', foto: null });
   };
 
-  const removeLesion = (id) => {
-    setFormData(prev => ({
-      ...prev,
-      lesoes: prev.lesoes.filter(l => l.id !== id)
-    }));
-  };
+  const removeLesion = (id) => setFormData(prev => ({ ...prev, lesoes: prev.lesoes.filter(l => l.id !== id) }));
 
   const toggleComorbidade = (item) => {
     setFormData(prev => {
@@ -172,485 +102,277 @@ const App = () => {
   };
 
   const nextStep = () => { 
-    if (step === 4 && formData.lesoes.length === 0) {
-      alert("Adicione pelo menos uma lesão antes de prosseguir.");
-      return;
+    if (step === 4 && formData.lesoes.length === 0) { alert("Adicione pelo menos uma lesão."); return; }
+    if (step < totalSteps) { 
+      setStep(step + 1); 
+      document.getElementById('form-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    if (step < totalSteps) setStep(step + 1); 
   };
   const prevStep = () => { if (step > 1) setStep(step - 1); };
 
-  // --- LOGIN ADMIN ---
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    const userClean = loginData.user.trim().toLowerCase();
-    const passClean = loginData.pass.trim();
-    // OBS: Em produção, o ideal é usar Firebase Auth (email/senha) real, não hardcoded.
-    if (userClean === 'admin' && passClean === 'lpp2026') {
-      setIsAdminLoggedIn(true);
-      setView('list');
+    if (loginData.user.trim().toLowerCase() === 'admin' && loginData.pass.trim() === 'lpp2026') {
+      setIsAdminLoggedIn(true); 
+      setView('list'); 
       setLoginError('');
-      setLoginData({ user: '', pass: '' }); 
+      fetchRecordsFromSheet(); // Carrega ao logar
     } else {
-      setLoginError('Acesso negado.');
+      setLoginError('Dados incorretos.');
     }
   };
 
-  // --- BANCO DE DADOS ---
+  // --- ENVIO PARA PLANILHA ---
   const handleFinalize = async () => {
-    if (!user) { alert("Sem conexão com o banco de dados."); return; }
-    if (!formData.nome || !formData.responsavel) { alert("Nome e Responsável são obrigatórios."); return; }
+    if (!formData.nome || !formData.responsavel) { alert("Campos obrigatórios vazios."); return; }
+    if (GOOGLE_SCRIPT_URL.includes("SUA_URL")) { alert("Erro: Configure a URL do Google Script no código."); return; }
 
     setIsSubmitting(true);
+
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes'), {
-        ...formData,
-        dataRegistro: new Date().toISOString(),
-        userId: user.uid,
-        archived: false
+      // fetch com no-cors para enviar dados sem bloqueio do navegador
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData)
       });
+
+      // Assumimos sucesso pois no-cors não retorna status legível
       setIsSubmitting(false);
       setIsSuccess(true);
+      
     } catch (error) {
       setIsSubmitting(false);
-      console.error(error);
-      alert("Erro ao salvar. Tente novamente ou verifique sua conexão.");
+      alert("Erro ao enviar. Verifique sua internet.");
     }
   };
 
-  const fetchRecords = async () => {
-    if (!user) return;
+  // --- LEITURA DA PLANILHA (ADMIN) ---
+  const fetchRecordsFromSheet = async () => {
+    if (GOOGLE_SCRIPT_URL.includes("SUA_URL")) return;
     setIsLoadingRecords(true);
     try {
-      const qs = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes'));
-      const data = qs.docs.map(d => ({ id: d.id, ...d.data() }));
-      data.sort((a, b) => new Date(b.dataRegistro || 0) - new Date(a.dataRegistro || 0));
+      // O GET normal retorna os dados em JSON
+      const response = await fetch(GOOGLE_SCRIPT_URL);
+      const data = await response.json();
       setRecords(data);
     } catch (e) { 
       console.error(e);
-      alert("Erro ao buscar registros. Verifique se suas regras do Firestore permitem leitura."); 
+      alert("Erro ao carregar dados da planilha."); 
     } finally { setIsLoadingRecords(false); }
   };
 
-  const handleArchiveRecord = async (id, status) => {
-    if (!confirm(status ? "Arquivar este registro?" : "Restaurar este registro?")) return;
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes', id), { archived: status });
-      setRecords(prev => prev.map(r => r.id === id ? { ...r, archived: status } : r));
-    } catch (e) { alert("Erro ao atualizar."); }
-  };
-
-  const handleDeleteRecord = async (id) => {
-    if (!confirm("ATENÇÃO: Excluir permanentemente este registro?")) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'registros_lesoes', id));
-      setRecords(prev => prev.filter(r => r.id !== id));
-    } catch (e) { alert("Erro ao excluir."); }
-  };
-
-  // --- EXPORTAÇÃO ---
-  const exportToCSV = () => {
-    if (records.length === 0) { alert("Sem dados para exportar."); return; }
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Data,Nome,SARAM,Prontuario,Origem,Responsavel,Qtd Lesoes,Detalhes\n";
-
-    records.forEach(rec => {
-      const dataReg = new Date(rec.dataRegistro).toLocaleDateString();
-      let resumoLesoes = "";
-      if (rec.lesoes && rec.lesoes.length > 0) {
-        resumoLesoes = rec.lesoes.map(l => `${l.localizacao} (${l.etiologia})`).join(' | ');
-      } else {
-        resumoLesoes = `${rec.localizacaoLesao || ''} (${rec.etiologia || ''})`;
-      }
-      const clean = (t) => t ? `"${t.toString().replace(/"/g, '""')}"` : '""';
-      const row = [clean(dataReg), clean(rec.nome), clean(rec.saram), clean(rec.prontuario), clean(rec.origem), clean(rec.responsavel), clean(rec.lesoes ? rec.lesoes.length : 1), clean(resumoLesoes)].join(",");
-      csvContent += row + "\n";
-    });
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `comissao_pele_haco_${new Date().toLocaleDateString().replace(/\//g,'-')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  useEffect(() => { if (view === 'list' && user) fetchRecords(); }, [view, user]);
-
-  // --- COPY TO CLIPBOARD ---
-  const copyToClipboard = (data) => {
-    const lesoesText = data.lesoes && data.lesoes.length > 0 
-      ? data.lesoes.map((l, i) => {
-          const estagioInfo = l.etiologia === 'Lesão por pressão' && l.estagio ? ` - Estágio: ${l.estagio}` : '';
-          return `   ${i+1}. ${l.localizacao} (${l.etiologia}${estagioInfo}) - ${l.medida}, Evolução: ${l.tempoEvolucao}`;
-        }).join('\n')
-      : `   - ${data.localizacaoLesao || '?'} (${data.etiologia || '?'}) - ${data.medidaLesao || '?'}`;
-
-    const text = `
---- REGISTRO COMISSÃO DE PELE (HACO) ---
-PACIENTE: ${data.nome}
-SARAM: ${data.saram} | PRONT: ${data.prontuario}
-ORIGEM: ${data.origem}
-NASC: ${data.nascimento ? new Date(data.nascimento).toLocaleDateString('pt-BR') : '-'}
-
-LESÕES:
-${lesoesText}
-
-CONDUTA: ${data.condutasPrevias}
-
-CLÍNICA:
-- Comorbidades: ${data.comorbidades?.join(', ')} ${data.outraComorbidade ? '- ' + data.outraComorbidade : ''}
-- Medic: ${data.medicacoes}
-- Cirurgias: ${data.cirurgias}
-- Cuidador: ${data.temCuidador} | Acomp: ${data.acompanhamentoAmbu}
-
-Resp: ${data.responsavel} - Data: ${new Date(data.dataRegistro || Date.now()).toLocaleDateString('pt-BR')}
------------------------------------`.trim();
-    navigator.clipboard.writeText(text);
-    alert("Prontuário copiado!");
-  };
-
+  // Filtro de busca
   const filteredRecords = records.filter(rec => {
-    const match = rec.nome?.toLowerCase().includes(searchTerm.toLowerCase()) || rec.saram?.includes(searchTerm);
-    return match && (showArchived ? rec.archived : !rec.archived);
+    const term = searchTerm.toLowerCase();
+    return rec.nome?.toLowerCase().includes(term) || rec.saram?.toString().includes(term);
   });
 
-  // --- RENDERIZADORES ---
+  const copyToClipboard = (data) => {
+    const lesoesText = data.lesoes?.map((l, i) => `   ${i+1}. ${l.localizacao} (${l.etiologia}${l.estagio?` - ${l.estagio}`:''}) - ${l.medida}, Evol: ${l.tempoEvolucao}`).join('\n') || '   - Dados incompletos';
+    const text = `--- COMISSÃO DE PELE (HACO) ---\nPACIENTE: ${data.nome}\nSARAM: ${data.saram} | PRONT: ${data.prontuario}\nORIGEM: ${data.origem}\nNASC: ${data.nascimento}\n\nLESÕES:\n${lesoesText}\n\nCONDUTA: ${data.condutasPrevias}\n\nCLÍNICA:\n- Comorbidades: ${data.comorbidades?.join(', ')} ${data.outraComorbidade||''}\n- Medic: ${data.medicacoes}\n- Cirurgias: ${data.cirurgias}\n- Cuidador: ${data.temCuidador} | Acomp: ${data.acompanhamentoAmbu}\n\nResp: ${data.responsavel} - Data: ${new Date(data.dataRegistro||Date.now()).toLocaleDateString('pt-BR')}`;
+    navigator.clipboard.writeText(text); alert("Copiado!");
+  };
+
+  // --- RENDERIZAÇÃO DE PASSOS ---
   const renderFormStep = () => {
     switch(step) {
-      case 1: // ID
-        return (
-          <div className="space-y-4 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><User className="text-blue-600"/> Identificação</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="text-sm font-medium text-slate-700">Nome Completo *</label>
-                <input type="text" value={formData.nome} onChange={e=>handleChange('nome', e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nome do Paciente"/>
-              </div>
-              <div><label className="text-sm font-medium text-slate-700">Nascimento *</label><input type="date" value={formData.nascimento} onChange={e=>handleChange('nascimento', e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500"/></div>
-              <div><label className="text-sm font-medium text-slate-700">SARAM *</label><input type="text" value={formData.saram} onChange={e=>handleChange('saram', e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500"/></div>
-              <div><label className="text-sm font-medium text-slate-700">Prontuário *</label><input type="text" value={formData.prontuario} onChange={e=>handleChange('prontuario', e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500"/></div>
-              <div><label className="text-sm font-medium text-slate-700">Origem *</label>
-                <select value={formData.origem} onChange={e=>handleChange('origem', e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 bg-white">
-                  <option value="">Selecione...</option>
-                  <option value="UPI">UPI</option>
-                  <option value="UTI">UTI</option>
-                  <option value="UPA">UPA</option>
-                  <option value="UCC">UCC</option>
-                  <option value="SAD">SAD</option>
-                  <option value="CAIS">CAIS</option>
-                </select>
-              </div>
+      case 1: return (
+        <div className="animate-fade-in space-y-2">
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Identificação</h2>
+          <InputGroup label="Dados Pessoais">
+            <AppInput placeholder="Nome Completo" value={formData.nome} onChange={e=>handleChange('nome', e.target.value)} />
+            <div className="mt-3"><label className="text-[10px] text-slate-400 block mb-1">Data de Nascimento</label><AppInput type="date" value={formData.nascimento} onChange={e=>handleChange('nascimento', e.target.value)} /></div>
+          </InputGroup>
+          <InputGroup label="Dados Militares / Hospitalares">
+            <div className="grid grid-cols-2 gap-4">
+              <AppInput type="tel" placeholder="SARAM" value={formData.saram} onChange={e=>handleChange('saram', e.target.value)} />
+              <AppInput type="tel" placeholder="Prontuário" value={formData.prontuario} onChange={e=>handleChange('prontuario', e.target.value)} />
             </div>
-          </div>
-        );
-      case 2: // Clínico
-        return (
-          <div className="space-y-4 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Activity className="text-blue-600"/> Histórico Clínico</h2>
-            <div><label className="text-sm font-medium text-slate-700 mb-2 block">Comorbidades</label>
-              <div className="grid grid-cols-2 gap-2">
-                {['HAS','DM','D. Arterial Periférica','D. Venosa Periférica','Neoplasia','Outro'].map(i=>(
-                  <button key={i} type="button" onClick={()=>toggleComorbidade(i)} className={`p-2 text-sm text-left rounded-lg border ${formData.comorbidades.includes(i)?'bg-blue-100 border-blue-500 text-blue-800':'bg-white hover:bg-slate-50'}`}>{i}</button>
-                ))}
-              </div>
-              {formData.comorbidades.includes('Outro') && <input type="text" placeholder="Qual?" value={formData.outraComorbidade} onChange={e=>handleChange('outraComorbidade',e.target.value)} className="mt-2 w-full p-2 border-b-2 border-slate-200 outline-none"/>}
+          </InputGroup>
+          <InputGroup label="Origem da Solicitação">
+            <div className="grid grid-cols-3 gap-2">
+              {['UPI','UTI','UPA','UCC','SAD','CAIS'].map(opt => (
+                <button key={opt} type="button" onClick={()=>handleChange('origem', opt)} className={`py-3 rounded-xl text-xs sm:text-sm font-bold transition-all ${formData.origem===opt ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>{opt}</button>
+              ))}
             </div>
-            <div><label className="text-sm font-medium text-slate-700">Medicações</label><textarea rows="2" value={formData.medicacoes} onChange={e=>handleChange('medicacoes',e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none"/></div>
-            <div><label className="text-sm font-medium text-slate-700">Cirurgias</label><textarea rows="2" value={formData.cirurgias} onChange={e=>handleChange('cirurgias',e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none"/></div>
-          </div>
-        );
-      case 3: // Social
-        return (
-          <div className="space-y-4 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Home className="text-blue-600"/> Apoio Social</h2>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <label className="font-medium text-slate-800">Cuidador Domiciliar?</label>
-              <div className="flex gap-4 mt-2">
-                {['Sim','Não'].map(o=><label key={o} className="flex items-center gap-2"><input type="radio" name="cuid" checked={formData.temCuidador===o} onChange={()=>handleChange('temCuidador',o)}/> {o}</label>)}
-              </div>
+          </InputGroup>
+        </div>
+      );
+      case 2: return (
+        <div className="animate-fade-in space-y-2">
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Clínicos</h2>
+          <InputGroup label="Comorbidades">
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {['HAS','DM','D. Arterial','D. Venosa','Neoplasia'].map(i=>(<button key={i} type="button" onClick={()=>toggleComorbidade(i)} className={`p-3 text-xs font-medium rounded-xl border transition-all ${formData.comorbidades.includes(i)?'bg-blue-600 text-white border-blue-600':'bg-slate-50 text-slate-600 border-transparent'}`}>{i}</button>))}
             </div>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <label className="font-medium text-slate-800">Acomp. Ambulatorial?</label>
-              <div className="flex gap-4 mt-2 mb-2">
-                {['Sim','Não'].map(o=><label key={o} className="flex items-center gap-2"><input type="radio" name="ambu" checked={formData.acompanhamentoAmbu===o} onChange={()=>handleChange('acompanhamentoAmbu',o)}/> {o}</label>)}
-              </div>
-              {formData.acompanhamentoAmbu==='Sim' && <input type="text" placeholder="Qual especialista?" value={formData.especialistaAmbu} onChange={e=>handleChange('especialistaAmbu',e.target.value)} className="w-full p-2 rounded border border-slate-300"/>}
+            <AppInput placeholder="Outra comorbidade..." value={formData.outraComorbidade} onChange={e=>handleChange('outraComorbidade', e.target.value)} />
+          </InputGroup>
+          <InputGroup label="Histórico">
+            <div className="space-y-4">
+              <textarea rows="2" placeholder="Medicações..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.medicacoes} onChange={e=>handleChange('medicacoes', e.target.value)} />
+              <textarea rows="2" placeholder="Cirurgias..." className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" value={formData.cirurgias} onChange={e=>handleChange('cirurgias', e.target.value)} />
             </div>
-          </div>
-        );
-      case 4: // Lesões
-        return (
-          <div className="space-y-6 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><AlertCircle className="text-red-600"/> Cadastro de Lesões</h2>
-            
-            {formData.lesoes.length > 0 && (
-              <div className="space-y-2 mb-4">
-                <h3 className="text-sm font-bold text-slate-600 uppercase tracking-wide">Lesões Adicionadas ({formData.lesoes.length})</h3>
-                {formData.lesoes.map((lesao, idx) => (
-                  <div key={lesao.id} className="bg-red-50 p-3 rounded-lg border border-red-100 flex justify-between items-start">
-                    <div className="flex gap-3">
-                      {lesao.foto && <img src={lesao.foto} alt="Lesão" className="w-12 h-12 rounded object-cover border border-red-200" />}
-                      <div>
-                        <p className="font-bold text-red-900 text-sm">#{idx+1} {lesao.localizacao}</p>
-                        <p className="text-xs text-red-700">{lesao.etiologia} {lesao.estagio && `- ${lesao.estagio}`} | {lesao.medida}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => removeLesion(lesao.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16}/></button>
+          </InputGroup>
+        </div>
+      );
+      case 3: return (
+        <div className="animate-fade-in space-y-2">
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Dados Sociais</h2>
+          <InputGroup label="Suporte Domiciliar">
+            <p className="text-sm text-slate-600 mb-2">Possui cuidador apto?</p>
+            <div className="flex gap-2">{['Sim', 'Não'].map(opt => (<button key={opt} type="button" onClick={()=>handleChange('temCuidador', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.temCuidador===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>))}</div>
+          </InputGroup>
+          <InputGroup label="Acompanhamento">
+            <p className="text-sm text-slate-600 mb-2">Acomp. Ambulatorial?</p>
+            <div className="flex gap-2 mb-4">{['Sim', 'Não'].map(opt => (<button key={opt} type="button" onClick={()=>handleChange('acompanhamentoAmbu', opt)} className={`flex-1 py-3 rounded-xl font-bold ${formData.acompanhamentoAmbu===opt ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{opt}</button>))}</div>
+            {formData.acompanhamentoAmbu === 'Sim' && (<AppInput placeholder="Qual especialista?" value={formData.especialistaAmbu} onChange={e=>handleChange('especialistaAmbu',e.target.value)} />)}
+          </InputGroup>
+        </div>
+      );
+      case 4: return (
+        <div className="animate-fade-in space-y-4">
+          <h2 className="text-xl font-bold text-slate-900 px-1 mb-2">Registro de Lesões</h2>
+          {formData.lesoes.length > 0 && (
+            <div className="flex overflow-x-auto gap-3 pb-2 -mx-4 px-4 snap-x hide-scrollbar">
+              {formData.lesoes.map((lesao, idx) => (
+                <div key={lesao.id} className="snap-center shrink-0 w-72 bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex gap-3 items-center">
+                  <div className="h-16 w-16 bg-slate-100 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
+                    {lesao.foto ? <img src={lesao.foto} className="h-full w-full object-cover" /> : <ImageIcon size={20} className="text-slate-300"/>}
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div className="bg-slate-50 p-4 rounded-xl border border-blue-200 shadow-sm relative">
-              <div className="absolute top-0 left-0 bg-blue-600 text-white text-xs px-2 py-1 rounded-br-lg font-bold">Nova Lesão</div>
-              <div className="grid md:grid-cols-2 gap-3 mt-4">
-                <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Localização *</label>
-                  <input type="text" value={currentLesion.localizacao} onChange={e=>handleLesionChange('localizacao', e.target.value)} className="w-full p-2 rounded border border-slate-300 outline-none" placeholder="Ex: Região Sacral"/>
+                  <div className="flex-1 min-w-0"><p className="font-bold text-slate-800 text-sm truncate">{lesao.localizacao}</p><p className="text-xs text-slate-500 truncate">{lesao.etiologia}</p><p className="text-[10px] font-bold text-blue-600 mt-1 bg-blue-50 inline-block px-1.5 rounded">{lesao.medida}</p></div>
+                  <button onClick={() => removeLesion(lesao.id)} className="text-slate-300 hover:text-red-500"><X size={20}/></button>
                 </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Etiologia *</label>
-                  <select value={currentLesion.etiologia} onChange={e=>handleLesionChange('etiologia', e.target.value)} className="w-full p-2 rounded border border-slate-300 bg-white outline-none">
-                    <option value="">Selecione...</option>
-                    <option value="Lesão por pressão">Lesão por pressão (LPP)</option>
-                    <option value="Lesão arterial">Lesão arterial</option>
-                    <option value="Lesão venosa">Lesão venosa</option>
-                    <option value="Queimadura">Queimadura</option>
-                    <option value="Deiscência Cirúrgica">Deiscência Cirúrgica</option>
-                    <option value="Outro">Outro</option>
-                  </select>
-                </div>
-                {currentLesion.etiologia === 'Lesão por pressão' && (
-                  <div className="md:col-span-2 bg-yellow-50 p-2 rounded border border-yellow-200">
-                    <label className="text-xs font-bold text-yellow-800 uppercase">Estágio LPP (NPUAP)</label>
-                    <select value={currentLesion.estagio} onChange={e=>handleLesionChange('estagio', e.target.value)} className="w-full p-2 mt-1 rounded border border-yellow-300 bg-white outline-none">
-                      <option value="">Selecione o estágio...</option>
-                      <option value="Estágio 1">Estágio 1 (Pele íntegra, eritema)</option>
-                      <option value="Estágio 2">Estágio 2 (Perda parcial espessura)</option>
-                      <option value="Estágio 3">Estágio 3 (Perda total espessura)</option>
-                      <option value="Estágio 4">Estágio 4 (Perda total + tecidos)</option>
-                      <option value="Não Classificável">Não Classificável</option>
-                      <option value="Tecidos Profundos">Lesão Tecidos Profundos</option>
-                    </select>
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase">Medidas (cm) *</label>
-                  <input type="text" value={currentLesion.medida} onChange={e=>handleLesionChange('medida', e.target.value)} className="w-full p-2 rounded border border-slate-300 outline-none" placeholder="CxLxP"/>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase">Tempo Evolução</label>
-                  <input type="text" value={currentLesion.tempoEvolucao} onChange={e=>handleLesionChange('tempoEvolucao', e.target.value)} className="w-full p-2 rounded border border-slate-300 outline-none" placeholder="Ex: 5 dias"/>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Foto da Lesão</label>
-                  <div className="flex items-center gap-2">
-                    <label className="flex-1 cursor-pointer bg-white border border-dashed border-slate-300 rounded-lg p-3 flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors">
-                      <Camera size={18} className="text-slate-400" />
-                      <span className="text-sm text-slate-500">{currentLesion.foto ? 'Foto selecionada (Clique para trocar)' : 'Clique para tirar/anexar foto'}</span>
-                      <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-                    </label>
-                    {currentLesion.foto && (
-                      <div className="relative w-12 h-12 shrink-0">
-                        <img src={currentLesion.foto} alt="Preview" className="w-full h-full object-cover rounded border border-slate-200"/>
-                        <button onClick={()=>setCurrentLesion(p=>({...p, foto:null}))} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={10}/></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <button type="button" onClick={addLesion} className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 shadow-sm transition-all active:scale-[0.98]">
-                <Plus size={18}/> Adicionar esta lesão
-              </button>
+              ))}
             </div>
-            <div className="pt-4 border-t border-slate-200">
-               <label className="text-sm font-bold text-slate-700 block mb-1">Condutas/Cuidados Gerais já Aplicados *</label>
-               <textarea rows="2" value={formData.condutasPrevias} onChange={e=>handleChange('condutasPrevias',e.target.value)} className="w-full p-3 rounded-lg border border-slate-300 outline-none" placeholder="Ex: Mudança de decúbito, Hidratação, Curativo com Alginato..."/>
+          )}
+          <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+            <div className="flex justify-between items-center mb-4"><span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nova Lesão</span><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full">#{formData.lesoes.length + 1}</span></div>
+            <div className="space-y-4">
+              <AppInput placeholder="Localização (ex: Sacral)" value={currentLesion.localizacao} onChange={e=>handleLesionChange('localizacao', e.target.value)} />
+              <div className="relative"><select className="w-full appearance-none bg-slate-50 p-3 rounded-xl text-sm font-medium text-slate-700 outline-none" value={currentLesion.etiologia} onChange={e=>handleLesionChange('etiologia', e.target.value)}><option value="">Selecione a Etiologia...</option><option value="Lesão por pressão">Lesão por pressão (LPP)</option><option value="Lesão arterial">Lesão arterial</option><option value="Lesão venosa">Lesão venosa</option><option value="Queimadura">Queimadura</option><option value="Deiscência Cirúrgica">Deiscência</option><option value="Outro">Outro</option></select><ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16}/></div>
+              {currentLesion.etiologia === 'Lesão por pressão' && (<div className="bg-orange-50 p-3 rounded-xl border border-orange-100"><label className="text-[10px] font-bold text-orange-700 uppercase mb-1 block">Classificação NPUAP</label><select className="w-full bg-white p-2 rounded-lg text-sm text-slate-700 outline-none" value={currentLesion.estagio} onChange={e=>handleLesionChange('estagio', e.target.value)}><option value="">Selecione...</option><option value="Estágio 1">Estágio 1</option><option value="Estágio 2">Estágio 2</option><option value="Estágio 3">Estágio 3</option><option value="Estágio 4">Estágio 4</option><option value="Não Classificável">Não Classificável</option><option value="Tecidos Profundos">Tecidos Profundos</option></select></div>)}
+              <div className="grid grid-cols-2 gap-3"><AppInput placeholder="Medidas (CxLxP)" value={currentLesion.medida} onChange={e=>handleLesionChange('medida', e.target.value)} /><AppInput placeholder="Tempo (dias)" value={currentLesion.tempoEvolucao} onChange={e=>handleLesionChange('tempoEvolucao', e.target.value)} /></div>
+              <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer active:bg-slate-100 transition-colors"><div className="h-10 w-10 bg-white rounded-full flex items-center justify-center text-blue-500 shadow-sm border border-slate-100"><Camera size={20}/></div><div className="flex-1"><span className="text-sm font-bold text-slate-700 block">{currentLesion.foto ? 'Foto Anexada' : 'Tirar Foto'}</span><span className="text-[10px] text-slate-400 block">{currentLesion.foto ? 'Toque para trocar' : 'Opcional'}</span></div><input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />{currentLesion.foto && <div className="h-10 w-10 rounded-lg overflow-hidden border border-white shadow-sm"><img src={currentLesion.foto} className="w-full h-full object-cover"/></div>}</label>
+              <button type="button" onClick={addLesion} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"><Plus size={20}/> Salvar Lesão</button>
             </div>
           </div>
-        );
-      case 5: // Final
-        return (
-          <div className="space-y-6 animate-fade-in text-center">
-            <h2 className="text-xl font-bold text-slate-800 flex justify-center items-center gap-2"><Stethoscope className="text-blue-600"/> Resumo Final</h2>
-            <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 text-left text-sm space-y-2">
-              <p><strong>Paciente:</strong> {formData.nome}</p>
-              <p><strong>Total de Lesões:</strong> {formData.lesoes.length}</p>
-              <div className="pl-2 border-l-2 border-blue-300 space-y-1">
-                {formData.lesoes.map((l,i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    {l.foto && <ImageIcon size={12} className="text-blue-500"/>}
-                    <p className="text-xs text-blue-800">#{i+1} {l.localizacao} ({l.etiologia})</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="text-left">
-              <label className="text-sm font-bold text-slate-700">Responsável pelo Preenchimento *</label>
-              <input type="text" value={formData.responsavel} onChange={e=>handleChange('responsavel',e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.preventDefault()}} className="w-full p-3 rounded-lg border border-slate-300 outline-none" placeholder="Seu nome completo"/>
-            </div>
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Condutas / Cuidados</label><textarea rows="3" className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none resize-none focus:ring-2 focus:ring-blue-100" placeholder="Descreva os curativos e condutas..." value={formData.condutasPrevias} onChange={e=>handleChange('condutasPrevias',e.target.value)} /></div>
+        </div>
+      );
+      case 5: return (
+        <div className="animate-fade-in space-y-6 pt-4 text-center">
+          <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto text-blue-600 mb-2 shadow-sm"><Stethoscope size={36}/></div>
+          <div><h2 className="text-2xl font-bold text-slate-900">Resumo Final</h2><p className="text-slate-500 text-sm">Confira os dados antes de enviar.</p></div>
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-left space-y-4">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-50"><span className="text-xs font-bold text-slate-400 uppercase">Paciente</span><span className="font-bold text-slate-800">{formData.nome}</span></div>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-50"><span className="text-xs font-bold text-slate-400 uppercase">Lesões</span><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{formData.lesoes.length} registradas</span></div>
+            <div><span className="text-xs font-bold text-slate-400 uppercase mb-2 block">Seu Nome (Responsável)</span><input type="text" className="w-full p-3 bg-slate-50 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Digite seu nome..." value={formData.responsavel} onChange={e=>handleChange('responsavel',e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.preventDefault()}}/></div>
           </div>
-        );
+        </div>
+      );
       default: return null;
     }
   };
 
-  // --- RENDERIZAR MAIN ---
   if (isSuccess) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white max-w-md w-full rounded-2xl shadow-xl p-8 text-center border-t-4 border-green-500">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><Check className="text-green-600" size={32}/></div>
-          <h2 className="text-2xl font-bold text-slate-800">Cadastro Realizado!</h2>
-          <p className="text-slate-600 my-4">Dados de <strong>{formData.nome}</strong> salvos com {formData.lesoes.length} lesões.</p>
-          <button onClick={()=>copyToClipboard(formData)} className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-bold mb-3 border border-blue-200 flex justify-center gap-2"><Copy size={18}/> Copiar Evolução</button>
-          <button onClick={()=>{setIsSuccess(false); setStep(1); setFormData({...formData, nome:'', saram:'', prontuario:'', lesoes:[], responsavel:''});}} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex justify-center gap-2"><Clipboard size={18}/> Novo Cadastro</button>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+        <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center text-green-500 mb-6"><Check size={48}/></div>
+        <h2 className="text-3xl font-bold text-slate-900 mb-2">Sucesso!</h2>
+        <p className="text-slate-500 mb-8 max-w-xs mx-auto">Dados enviados para a planilha.</p>
+        <div className="w-full max-w-xs space-y-3">
+          <button onClick={()=>copyToClipboard(formData)} className="w-full py-4 bg-slate-50 text-slate-700 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"><Copy size={20}/> Copiar Evolução</button>
+          <button onClick={()=>{setIsSuccess(false); setStep(1); setFormData({...formData, nome:'', saram:'', prontuario:'', lesoes:[], responsavel:''});}} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-200 active:scale-95 transition-transform"><Plus size={20}/> Novo Cadastro</button>
         </div>
       </div>
     );
   }
 
+  // --- RENDERIZAÇÃO PRINCIPAL (LAYOUT MOBILE) ---
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-      <div className="max-w-xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[700px]">
-        <div className="bg-blue-900 p-5 text-white flex justify-between items-start">
-          <div>
-            <h1 className="text-lg font-bold flex items-center gap-2"><Clipboard className="w-5 h-5"/>Notificação de Feridas e Lesões Por Pressão</h1>
-            <p className="text-blue-200 text-[10px] uppercase tracking-wider">Hospital de Aeronáutica de Canoas</p>
-          </div>
-          <button onClick={() => { if(view==='form'){ if(isAdminLoggedIn) setView('list'); else setView('login'); } else setView('form'); }} className="bg-blue-800 text-xs py-2 px-3 rounded-lg flex items-center gap-2 border border-blue-700">{view==='form'?<><Lock size={12}/> Admin</>:<><ArrowLeft size={12}/> Cadastro</>}</button>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 flex justify-center">
+      <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative flex flex-col">
+        
+        {/* HEADER FLUTUANTE */}
+        <div className="bg-white/90 backdrop-blur-md sticky top-0 z-50 px-5 py-4 flex justify-between items-center border-b border-slate-50">
+          <div><h1 className="font-bold text-xl text-slate-800 tracking-tight">Comissão Pele</h1><p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">HACO - Mobile</p></div>
+          <button onClick={() => { if(view==='form'){ if(isAdminLoggedIn) setView('list'); else setView('login'); } else setView('form'); }} className="h-10 w-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">{view==='form'?<Lock size={18}/>:<ArrowLeft size={18}/>}</button>
         </div>
 
         {view === 'login' && (
-           <div className="flex-1 flex flex-col items-center justify-center p-8">
-             <div className="w-full max-w-sm bg-slate-50 p-6 rounded-xl border border-slate-200">
-               <h2 className="text-center font-bold text-slate-700 mb-4">Acesso Restrito</h2>
-               <form onSubmit={handleAdminLogin} className="space-y-3">
-                 <input type="text" placeholder="Usuário" className="w-full p-2 rounded border" value={loginData.user} onChange={e=>setLoginData({...loginData, user:e.target.value})}/>
-                 <input type="password" placeholder="Senha" className="w-full p-2 rounded border" value={loginData.pass} onChange={e=>setLoginData({...loginData, pass:e.target.value})}/>
-                 {loginError && <p className="text-red-500 text-xs text-center">{loginError}</p>}
-                 <button className="w-full bg-blue-600 text-white py-2 rounded font-bold">Entrar</button>
-               </form>
-             </div>
+           <div className="flex-1 flex flex-col justify-center p-8">
+             <div className="text-center mb-8"><div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mx-auto mb-4"><Lock size={32}/></div><h2 className="text-2xl font-bold text-slate-800">Acesso Admin</h2></div>
+             <form onSubmit={handleAdminLogin} className="space-y-4">
+               <input type="text" placeholder="Usuário" className="w-full p-4 rounded-2xl bg-slate-50 font-medium outline-none focus:ring-2 focus:ring-blue-500" value={loginData.user} onChange={e=>setLoginData({...loginData, user:e.target.value})}/>
+               <input type="password" placeholder="Senha" className="w-full p-4 rounded-2xl bg-slate-50 font-medium outline-none focus:ring-2 focus:ring-blue-500" value={loginData.pass} onChange={e=>setLoginData({...loginData, pass:e.target.value})}/>
+               {loginError && <p className="text-red-500 text-sm text-center font-bold">{loginError}</p>}
+               <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all">Entrar</button>
+             </form>
            </div>
         )}
 
         {view === 'list' && isAdminLoggedIn && (
-          <div className="flex-1 p-4 flex flex-col bg-slate-50">
-            <div className="flex justify-between items-center mb-4">
-               <h2 className="font-bold text-slate-700">Registros</h2>
-               <div className="flex gap-2">
-                 <button onClick={exportToCSV} className="text-green-700 text-xs flex gap-1 items-center bg-green-50 px-2 py-1 rounded border border-green-200 hover:bg-green-100 transition-colors" title="Baixar planilha de backup"><FileSpreadsheet size={14}/> Exportar Excel</button>
-                 <button onClick={fetchRecords} className="text-blue-600 text-xs flex gap-1 items-center hover:bg-blue-50 px-2 py-1 rounded transition-colors"><RefreshCcw size={12} className={isLoadingRecords?'animate-spin':''}/> Atualizar</button>
+          <div className="flex-1 flex flex-col bg-slate-50">
+            <div className="bg-white px-4 pb-4 pt-2 shadow-sm z-40 sticky top-[73px]">
+               <div className="bg-slate-100 rounded-xl flex items-center px-4 py-3 mb-3"><Search className="text-slate-400 mr-3" size={20}/><input type="text" placeholder="Buscar prontuário..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="bg-transparent w-full outline-none font-medium"/></div>
+               <div className="flex justify-between">
+                 <div className="flex gap-2">
+                   <button onClick={fetchRecordsFromSheet} className="text-blue-600 bg-blue-50 h-8 w-8 rounded-lg flex items-center justify-center"><RefreshCcw size={16} className={isLoadingRecords?'animate-spin':''}/></button>
+                 </div>
                </div>
             </div>
-            <div className="flex gap-2 mb-4">
-               <input type="text" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="flex-1 p-2 rounded border text-sm"/>
-               <button onClick={()=>setShowArchived(!showArchived)} className="bg-white border p-2 rounded text-slate-500">{showArchived?<List size={16}/>:<Archive size={16}/>}</button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-3">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
                {filteredRecords.map(rec => (
-                 <div key={rec.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-sm transition-all">
-                    <div className="flex justify-between border-b pb-2 mb-2">
-                      <div>
-                        <strong className="text-slate-800 text-base">{rec.nome}</strong>
-                        <div className="flex gap-2 mt-1">
-                          <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">SARAM: {rec.saram}</span>
-                          <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{rec.origem}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-xs bg-slate-100 px-2 py-1 rounded block mb-1">{new Date(rec.dataRegistro).toLocaleDateString()}</span>
-                        <span className="text-[10px] text-slate-400">Total Lesões: {rec.lesoes ? rec.lesoes.length : 1}</span>
-                      </div>
+                 <div key={rec.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                    <div className="flex justify-between items-start mb-3">
+                      <div><h3 className="font-bold text-slate-800 text-lg">{rec.nome}</h3><div className="flex gap-2 mt-1"><span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded-md">{rec.origem}</span></div></div>
+                      <span className="text-[10px] font-bold text-slate-400">{new Date(rec.dataRegistro).toLocaleDateString()}</span>
                     </div>
-
                     {expandedRecordId === rec.id ? (
-                      <div className="animate-fade-in space-y-4 pt-2">
-                        <div className="grid grid-cols-2 gap-4 text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                           <div><span className="block font-bold text-slate-400 uppercase text-[10px]">Nascimento</span> {rec.nascimento ? new Date(rec.nascimento).toLocaleDateString() : '-'}</div>
-                           <div><span className="block font-bold text-slate-400 uppercase text-[10px]">Prontuário</span> {rec.prontuario}</div>
-                           <div className="col-span-2"><span className="block font-bold text-slate-400 uppercase text-[10px]">Comorbidades</span> {rec.comorbidades?.join(', ') || '-'} {rec.outraComorbidade}</div>
-                           <div className="col-span-2"><span className="block font-bold text-slate-400 uppercase text-[10px]">Medicações</span> {rec.medicacoes || '-'}</div>
-                           <div className="col-span-2"><span className="block font-bold text-slate-400 uppercase text-[10px]">Cuidados Prévios</span> {rec.condutasPrevias || '-'}</div>
+                      <div className="space-y-4 animate-fade-in pt-2 border-t border-slate-50 mt-2">
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                           <div className="bg-slate-50 p-2 rounded-lg"><p className="text-slate-400 font-bold uppercase text-[10px]">SARAM</p><p className="font-bold">{rec.saram}</p></div>
+                           <div className="bg-slate-50 p-2 rounded-lg"><p className="text-slate-400 font-bold uppercase text-[10px]">Prontuário</p><p className="font-bold">{rec.prontuario}</p></div>
                         </div>
-                        <div className="space-y-3">
-                          <h4 className="font-bold text-slate-700 text-xs flex items-center gap-1"><AlertCircle size={12}/> Detalhe das Lesões</h4>
-                          {rec.lesoes && rec.lesoes.length > 0 ? (
-                            rec.lesoes.map((l, i) => (
-                              <div key={i} className="bg-white border border-slate-200 rounded-lg p-3">
-                                <div className="flex gap-3 items-start">
-                                  {l.foto ? (
-                                    <div className="w-20 h-20 shrink-0 bg-slate-100 rounded border border-slate-200 overflow-hidden cursor-pointer" onClick={() => {const w = window.open(); w.document.write('<img src="'+l.foto+'"/>');}}>
-                                      <img src={l.foto} alt="Lesão" className="w-full h-full object-cover hover:scale-110 transition-transform"/>
-                                    </div>
-                                  ) : (
-                                    <div className="w-20 h-20 shrink-0 bg-slate-50 rounded border border-slate-200 flex items-center justify-center text-slate-300"><ImageIcon size={24}/></div>
-                                  )}
-                                  <div className="flex-1">
-                                    <p className="font-bold text-blue-900 text-sm">#{i+1} {l.localizacao}</p>
-                                    <p className="text-xs text-slate-600 mt-1"><span className="font-semibold">Etiologia:</span> {l.etiologia}</p>
-                                    {l.estagio && <p className="text-xs text-slate-600"><span className="font-semibold">Estágio:</span> {l.estagio}</p>}
-                                    <p className="text-xs text-slate-600"><span className="font-semibold">Medidas:</span> {l.medida}</p>
-                                    <p className="text-xs text-slate-600"><span className="font-semibold">Evolução:</span> {l.tempoEvolucao}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="text-xs p-2 bg-slate-50 border rounded">Dados resumidos antigos: {rec.localizacaoLesao} ({rec.etiologia})</div>
-                          )}
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-slate-400 uppercase">Lesões ({rec.lesoes?.length})</p>
+                          {rec.lesoes?.map((l, i) => (
+                            <div key={i} className="flex gap-3 bg-slate-50 p-2 rounded-xl">
+                              {l.foto ? <div onClick={() => {const w = window.open(); w.document.write('<img src="'+l.foto+'" style="width:100%"/>');}} className="h-12 w-12 rounded-lg overflow-hidden shrink-0"><img src={l.foto} className="w-full h-full object-cover"/></div> : <div className="h-12 w-12 bg-white rounded-lg flex items-center justify-center shrink-0 border border-slate-100"><ImageIcon size={16} className="text-slate-300"/></div>}
+                              <div className="text-xs"><p className="font-bold text-slate-800">{l.localizacao}</p><p className="text-slate-500">{l.etiologia}</p></div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
-                           <span className="text-[10px] text-slate-400">Resp: {rec.responsavel}</span>
-                           <button onClick={() => setExpandedRecordId(null)} className="text-blue-600 text-xs font-bold flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded">Ver Menos <ChevronUp size={14}/></button>
+                        <div className="flex gap-2 pt-2">
+                           <button onClick={()=>copyToClipboard(rec)} className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold active:scale-95">Copiar Texto</button>
+                           <button onClick={() => setExpandedRecordId(null)} className="px-4 bg-slate-100 rounded-xl"><ChevronUp size={16}/></button>
                         </div>
                       </div>
                     ) : (
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50">
-                         <div className="flex gap-2">
-                           <button onClick={()=>copyToClipboard(rec)} className="text-slate-500 hover:text-blue-600 transition-colors" title="Copiar"><Copy size={16}/></button>
-                           <button onClick={()=>handleArchiveRecord(rec.id, !showArchived)} className="text-slate-500 hover:text-orange-500 transition-colors" title="Arquivar"><Archive size={16}/></button>
-                           <button onClick={()=>handleDeleteRecord(rec.id)} className="text-slate-500 hover:text-red-500 transition-colors" title="Excluir"><Trash2 size={16}/></button>
-                         </div>
-                         <button onClick={() => setExpandedRecordId(rec.id)} className="bg-blue-600 text-white text-xs px-4 py-2 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-700 transition-colors shadow-sm">Ver Detalhes Completos <ChevronDown size={14}/></button>
-                      </div>
+                      <button onClick={() => setExpandedRecordId(rec.id)} className="w-full py-2 mt-2 bg-slate-50 text-blue-600 rounded-xl text-xs font-bold flex items-center justify-center gap-1">Ver Detalhes <ChevronDown size={14}/></button>
                     )}
                  </div>
                ))}
-               {filteredRecords.length === 0 && <p className="text-center text-slate-400 text-xs mt-10">Nenhum registro encontrado.</p>}
-            </div>
-            
-            <div className="mt-4 pt-4 border-t border-slate-200 text-xs text-slate-400 flex justify-between">
-               <span>Status: <span className={authStatus === 'Conectado' ? 'text-green-600 font-bold' : 'text-red-500'}>{authStatus}</span></span>
-               <span className="font-mono" title="ID do Banco">ID: {appId.slice(-6)}</span>
+               {filteredRecords.length === 0 && <div className="text-center py-10 text-slate-400 flex flex-col items-center gap-2"><Search size={30}/><p>Nenhum registro.</p></div>}
             </div>
           </div>
         )}
 
         {view === 'form' && (
-          <div className="flex-1 flex flex-col">
-            <div className="p-6 flex-1 overflow-y-auto">
-               <div className="mb-6">
-                 <div className="h-1 bg-slate-200 w-full rounded-full overflow-hidden">
-                   <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(step/totalSteps)*100}%`}}></div>
-                 </div>
-                 <p className="text-right text-xs text-blue-600 font-bold mt-1">Passo {step} de {totalSteps}</p>
-               </div>
-               
-               <form onSubmit={e=>e.preventDefault()}>
-                 {renderFormStep()}
-               </form>
+          <div className="flex-1 flex flex-col relative bg-slate-50">
+            <div id="form-scroll-container" className="p-5 flex-1 overflow-y-auto pb-32"> 
+               <StepIndicator step={step} />
+               <form onSubmit={e=>e.preventDefault()}>{renderFormStep()}</form>
             </div>
-            <div className="p-4 border-t border-slate-100 bg-white flex justify-between">
-               <button onClick={prevStep} disabled={step===1} className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1 ${step===1?'text-slate-300':'text-slate-600 hover:bg-slate-50'}`}><ChevronLeft size={16}/> Voltar</button>
+            <div className="absolute bottom-0 w-full bg-white border-t border-slate-100 p-4 pb-8 flex gap-3 z-30 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
+               <button onClick={prevStep} disabled={step===1} className={`h-14 w-14 rounded-2xl flex items-center justify-center transition-all ${step===1 ? 'text-slate-200 bg-slate-50' : 'text-slate-600 bg-slate-100 active:scale-95'}`}><ChevronLeft size={24}/></button>
                {step < totalSteps ? (
-                 <button onClick={nextStep} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-blue-700 shadow-sm">Próximo <ChevronRight size={16}/></button>
+                 <button onClick={nextStep} className="flex-1 h-14 bg-blue-600 text-white rounded-2xl font-bold text-lg shadow-xl shadow-blue-200 active:scale-95 transition-transform flex items-center justify-center gap-2">Próximo <ChevronRight size={20}/></button>
                ) : (
-                 <button onClick={handleFinalize} disabled={isSubmitting} className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm font-bold flex items-center gap-1 hover:bg-green-700 shadow-sm">
-                   {isSubmitting ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>} Finalizar
+                 <button onClick={handleFinalize} disabled={isSubmitting} className="flex-1 h-14 bg-green-600 text-white rounded-2xl font-bold text-lg shadow-xl shadow-green-200 active:scale-95 transition-transform flex items-center justify-center gap-2">
+                   {isSubmitting ? <Loader2 className="animate-spin" size={24}/> : <>Finalizar <Save size={20}/></>}
                  </button>
                )}
             </div>

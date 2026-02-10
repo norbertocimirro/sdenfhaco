@@ -84,8 +84,8 @@ const App = () => {
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { 
-      alert("Imagem muito grande. Use imagens menores que 2MB para o Google Sheets.");
+    if (file.size > 5 * 1024 * 1024) { 
+      alert("Imagem muito grande. Use imagens menores que 5MB.");
       return;
     }
     const reader = new FileReader();

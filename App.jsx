@@ -16,40 +16,51 @@ const API_URL_INDICADORES = "https://script.google.com/macros/s/AKfycbxJp8-2qRib
 
 const INITIAL_UPI_STATS = { leitosOcupados: 0, totalLeitos: 15, mediaBraden: 0, mediaFugulin: 0, dataReferencia: 'Sincronize para ver' };
 
-// Helper robusto para datas
-const formatDate = (dateInput) => {
-  if (!dateInput) return '-';
-  try {
-    const dateStr = String(dateInput);
-    if (dateStr.length === 10 && dateStr.includes('-')) {
-      const [year, month, day] = dateStr.split('-');
-      return `${day}/${month}/${year}`;
-    }
-    const date = new Date(dateStr.length === 10 ? dateStr + 'T12:00:00' : dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleDateString('pt-BR');
-  } catch (e) {
-    return '-';
+// Helper para buscar valores na linha da planilha sem se importar com o nome exato da coluna
+const getVal = (obj, searchTerms) => {
+  if (!obj) return "";
+  const keys = Object.keys(obj);
+  const foundKey = keys.find(k => 
+    searchTerms.some(term => k.toLowerCase().includes(term.toLowerCase()))
+  );
+  return foundKey ? obj[foundKey] : "";
+};
+
+// Converte string de data (Brasil ou ISO) para objeto Date
+const parseDate = (dateStr) => {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  // Caso DD/MM/YYYY
+  if (s.includes('/')) {
+    const [d, m, y] = s.split('/');
+    return new Date(y, m - 1, d, 12, 0, 0);
   }
+  // Caso YYYY-MM-DD
+  if (s.includes('-')) {
+    return new Date(s + 'T12:00:00');
+  }
+  return new Date(s);
+};
+
+// Helper para exibição de data
+const formatDate = (dateInput) => {
+  const date = parseDate(dateInput);
+  if (!date || isNaN(date.getTime())) return String(dateInput || '-');
+  return date.toLocaleDateString('pt-BR');
 };
 
 // Cálculo de Idade ou Tempo de Serviço
 const calculateYears = (dateInput) => {
-  if (!dateInput) return 0;
-  try {
-    const today = new Date();
-    const date = new Date(String(dateInput).length === 10 ? dateInput + 'T12:00:00' : dateInput);
-    if (isNaN(date.getTime())) return 0;
-    
-    let years = today.getFullYear() - date.getFullYear();
-    const m = today.getMonth() - date.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
-        years--;
-    }
-    return years;
-  } catch (e) {
-    return 0;
+  const date = parseDate(dateInput);
+  if (!date || isNaN(date.getTime())) return 0;
+  
+  const today = new Date();
+  let years = today.getFullYear() - date.getFullYear();
+  const m = today.getMonth() - date.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
+      years--;
   }
+  return years;
 };
 
 const safeParseFloat = (value) => {
@@ -98,7 +109,117 @@ const FileUpload = ({ onFileSelect }) => {
   );
 };
 
-const MainSystem = ({ user, role, onLogout }) => {
+const LoginScreen = ({ onLogin, officersList, isLoading }) => {
+  const [roleGroup, setRoleGroup] = useState('chefia');
+  const [user, setUser] = useState('');
+  
+  // Se a lista da planilha ainda não carregou, usamos um fallback básico para não travar
+  const list = officersList.length > 0 ? officersList : [
+    { nome: 'Zanini', patente: '1º Ten Enf', role: 'admin' },
+    { nome: 'Cimirro', patente: '1º Ten Enf', role: 'admin' }
+  ];
+
+  const filtered = roleGroup === 'chefia' 
+    ? list.filter(o => getVal(o, ['role']) === 'admin' || getVal(o, ['role']) === 'rt') 
+    : list.filter(o => getVal(o, ['role']) === 'user' || !getVal(o, ['role']));
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+        <div className="text-center mb-8">
+           <Plane size={48} className="mx-auto text-blue-600 mb-2"/>
+           <h1 className="text-2xl font-bold text-slate-800">SGA-Enf HACO</h1>
+           <p className="text-slate-500">Sistema de Gestão de Enfermagem</p>
+        </div>
+        
+        <div className="bg-slate-100 p-1 rounded-lg flex mb-4">
+           <button onClick={() => setRoleGroup('chefia')} className={`flex-1 py-2 text-sm font-bold rounded ${roleGroup === 'chefia' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>Chefia / RT</button>
+           <button onClick={() => setRoleGroup('tropa')} className={`flex-1 py-2 text-sm font-bold rounded ${roleGroup === 'tropa' ? 'bg-white shadow text-slate-700' : 'text-slate-400'}`}>Oficiais</button>
+        </div>
+
+        <select className="w-full p-3 border rounded-lg mb-4 bg-slate-50 font-medium" value={user} onChange={e => setUser(e.target.value)}>
+           <option value="">{isLoading ? "A carregar militares..." : "Selecione seu nome..."}</option>
+           {filtered.map((o, idx) => (
+             <option key={idx} value={getVal(o, ['nome'])}>
+               {getVal(o, ['posto', 'patente'])} {getVal(o, ['nome'])}
+             </option>
+           ))}
+        </select>
+
+        <button 
+           onClick={() => {
+              const selectedUser = list.find(o => getVal(o, ['nome']) === user);
+              if (selectedUser) onLogin(getVal(selectedUser, ['nome']), getVal(selectedUser, ['role']) || 'user');
+           }} 
+           disabled={!user || isLoading} 
+           className={`w-full py-3 rounded-lg font-bold text-white transition ${user ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-300 cursor-not-allowed'}`}
+        >
+           {isLoading ? "A SINCRONIZAR..." : "ACESSAR SISTEMA"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AgendaTab = ({ user }) => {
+  const [events, setEvents] = useState([]);
+  const [newEvent, setNewEvent] = useState({ date: '', title: '', type: 'work' });
+
+  useEffect(() => {
+    const savedAgenda = localStorage.getItem(`agenda_${user}`);
+    if (savedAgenda) setEvents(JSON.parse(savedAgenda));
+  }, [user]);
+
+  const addEvent = (e) => {
+    e.preventDefault();
+    const updatedEvents = [...events, { id: Date.now(), ...newEvent }];
+    setEvents(updatedEvents);
+    localStorage.setItem(`agenda_${user}`, JSON.stringify(updatedEvents));
+    setNewEvent({ date: '', title: '', type: 'work' });
+  };
+
+  const deleteEvent = (id) => {
+    const updatedEvents = events.filter(e => e.id !== id);
+    setEvents(updatedEvents);
+    localStorage.setItem(`agenda_${user}`, JSON.stringify(updatedEvents));
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fadeIn">
+      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm h-fit">
+         <h3 className="font-bold text-slate-700 mb-4 flex gap-2"><Plus size={18}/> Novo Evento</h3>
+         <form onSubmit={addEvent} className="space-y-3">
+            <input type="date" className="w-full p-2 border rounded text-sm" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})} required />
+            <input type="text" placeholder="Título" className="w-full p-2 border rounded text-sm" value={newEvent.title} onChange={e => setNewEvent({...newEvent, title: e.target.value})} required />
+            <select className="w-full p-2 border rounded text-sm bg-white" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value})}>
+               <option value="work">Trabalho</option>
+               <option value="family">Família</option>
+               <option value="personal">Pessoal</option>
+            </select>
+            <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2 rounded text-sm hover:bg-slate-700">Adicionar</button>
+         </form>
+      </div>
+
+      <div className="md:col-span-2 space-y-4">
+         <h3 className="font-bold text-slate-800 flex items-center gap-2"><BookOpen className="text-indigo-500"/> Agenda de {user}</h3>
+         {events.sort((a,b) => new Date(a.date) - new Date(b.date)).map(ev => (
+            <div key={ev.id} className="bg-white p-4 rounded-xl border-l-4 shadow-sm flex justify-between items-start" style={{borderLeftColor: ev.type === 'family' ? '#ec4899' : ev.type === 'personal' ? '#8b5cf6' : '#3b82f6'}}>
+               <div className="flex gap-4">
+                  <div className="text-center min-w-[50px]">
+                     <div className="text-xs font-bold text-slate-400 uppercase">{new Date(ev.date + 'T12:00:00').toLocaleDateString('pt-BR', {month:'short'})}</div>
+                     <div className="text-xl font-bold text-slate-800">{new Date(ev.date + 'T12:00:00').getDate()}</div>
+                  </div>
+                  <div><h4 className="font-bold text-slate-800">{ev.title}</h4><p className="text-sm text-slate-500">{ev.type.toUpperCase()}</p></div>
+               </div>
+               <button onClick={() => deleteEvent(ev.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
+            </div>
+         ))}
+      </div>
+    </div>
+  );
+};
+
+const MainSystem = ({ user, role, onLogout, globalOfficers, refreshGlobal }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -111,54 +232,43 @@ const MainSystem = ({ user, role, onLogout }) => {
   const [formPermuta, setFormPermuta] = useState({ dataSai: '', substituto: '', dataEntra: '' });
   const [fileData, setFileData] = useState(null);
 
-  const [officers, setOfficers] = useState([]);
   const [atestados, setAtestados] = useState([]);
   const [permutas, setPermutas] = useState([]);
   const [vacations, setVacations] = useState([]);
   const [upiStats, setUpiStats] = useState(INITIAL_UPI_STATS);
 
-  const pendingAtestados = Array.isArray(atestados) ? atestados.filter(a => a.status === 'Pendente').length : 0;
-  const pendingPermutas = Array.isArray(permutas) ? permutas.filter(p => p.status === 'Pendente').length : 0;
+  const pendingAtestados = atestados.filter(a => getVal(a, ['status']) === 'Pendente').length;
+  const pendingPermutas = permutas.filter(p => getVal(p, ['status']) === 'Pendente').length;
 
   const refreshData = async (showFeedback = true) => {
     setLoading(true);
     try {
+      await refreshGlobal(); // Atualiza a lista de oficiais
       if (API_URL_GESTAO) {
         const res1 = await fetch(`${API_URL_GESTAO}?action=getData`);
         if (res1.ok) {
-            const text1 = await res1.text();
-            if (!text1.trim().startsWith('<')) {
-                const data1 = JSON.parse(text1);
-                if (data1.atestados) setAtestados(data1.atestados);
-                if (data1.permutas) setPermutas(data1.permutas);
-                if (data1.vacations) setVacations(data1.vacations);
-                if (data1.officers) setOfficers(data1.officers);
-            }
+            const data1 = await res1.json();
+            if (data1.atestados) setAtestados(data1.atestados);
+            if (data1.permutas) setPermutas(data1.permutas);
+            if (data1.vacations) setVacations(data1.vacations);
         }
       }
       if (API_URL_INDICADORES) {
         const res2 = await fetch(`${API_URL_INDICADORES}?action=getData`);
         if (res2.ok) {
-             const text2 = await res2.text();
-             if (!text2.trim().startsWith('<')) {
-                const data2 = JSON.parse(text2);
-                if (data2.upiStats) {
-                   const findKey = (obj, search) => {
-                      const key = Object.keys(obj).find(k => k.toLowerCase().includes(search.toLowerCase()));
-                      return key ? obj[key] : 0;
-                   };
-                   setUpiStats({
-                     leitosOcupados: data2.upiStats.leitosOcupados || data2.upiStats.Ocupacao || 0,
-                     totalLeitos: 15,
-                     mediaBraden: safeParseFloat(findKey(data2.upiStats, 'braden')),
-                     mediaFugulin: safeParseFloat(findKey(data2.upiStats, 'fugulin')),
-                     dataReferencia: data2.upiStats.dataReferencia || '---'
-                   });
-                }
+             const data2 = await res2.json();
+             if (data2.upiStats) {
+                setUpiStats({
+                  leitosOcupados: getVal(data2.upiStats, ['ocupado', 'leito']) || 0,
+                  totalLeitos: 15,
+                  mediaBraden: safeParseFloat(getVal(data2.upiStats, ['braden'])),
+                  mediaFugulin: safeParseFloat(getVal(data2.upiStats, ['fugulin'])),
+                  dataReferencia: getVal(data2.upiStats, ['data', 'ref']) || '---'
+                });
              }
         }
       }
-      if (showFeedback) alert("Dados atualizados!");
+      if (showFeedback) alert("Sincronizado!");
     } catch(e) {
       if (showFeedback) alert(`Erro de conexão: ${e.message}`);
     } finally {
@@ -186,14 +296,8 @@ const MainSystem = ({ user, role, onLogout }) => {
 
   const handleHomologar = (id, type) => {
     if (role !== 'admin') return alert("Acesso restrito.");
-    if (type === 'atestado') {
-      setAtestados(atestados.map(a => a.id === id ? {...a, status: 'Homologado'} : a));
-      sendData('updateStatus', { sheet: 'Atestados', id: id, status: 'Homologado' });
-    }
-    if (type === 'permuta') {
-      setPermutas(permutas.map(p => p.id === id ? {...p, status: 'Homologado'} : p));
-      sendData('updateStatus', { sheet: 'Permutas', id: id, status: 'Homologado' });
-    }
+    const idField = type === 'atestado' ? 'id' : 'id';
+    sendData('updateStatus', { sheet: type === 'atestado' ? 'Atestados' : 'Permutas', id: id, status: 'Homologado' });
   };
 
   const submitAtestado = (e) => {
@@ -231,7 +335,7 @@ const MainSystem = ({ user, role, onLogout }) => {
                    </div>
                 </div>
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><p className="text-slate-500 text-xs uppercase font-bold">Pendências</p><h3 className="text-2xl font-bold text-slate-800">{pendingAtestados + pendingPermutas}</h3></div>
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><p className="text-slate-500 text-xs uppercase font-bold">Efetivo</p><h3 className="text-2xl font-bold text-slate-800">{officers.length}</h3></div>
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><p className="text-slate-500 text-xs uppercase font-bold">Efetivo</p><h3 className="text-2xl font-bold text-slate-800">{globalOfficers.length}</h3></div>
              </div>
           </div>
         );
@@ -242,78 +346,46 @@ const MainSystem = ({ user, role, onLogout }) => {
              <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 uppercase text-slate-500"><tr><th className="p-3">Status</th><th className="p-3">Militar</th><th className="p-3">Duração</th><th className="p-3">Data</th><th className="p-3">Anexo</th><th className="p-3">Ação</th></tr></thead>
                  <tbody className="divide-y divide-slate-50">
                    {atestados.map((a, idx) => (
-                     <tr key={idx} className={a.status === 'Pendente' ? 'bg-red-50/50' : ''}>
-                       <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${a.status === 'Pendente' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{a.status}</span></td>
-                       <td className="p-3 font-medium">{a.militar}</td>
-                       <td className="p-3 font-medium">{a.dias || '-'} dias</td>
-                       <td className="p-3 text-slate-500">{formatDate(a.inicio || a.data)}</td>
-                       <td className="p-3">{a.anexo && a.anexo.startsWith('http') ? <a href={a.anexo} target="_blank" className="text-blue-600 hover:underline"><Paperclip size={14}/></a> : '-'}</td>
-                       <td className="p-3">{a.status === 'Pendente' && role === 'admin' && <button onClick={() => handleHomologar(a.id, 'atestado')} className="text-blue-600 font-bold text-xs hover:underline">Homologar</button>}</td>
+                     <tr key={idx} className={getVal(a, ['status']) === 'Pendente' ? 'bg-red-50/50' : ''}>
+                       <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${getVal(a, ['status']) === 'Pendente' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{getVal(a, ['status'])}</span></td>
+                       <td className="p-3 font-medium">{getVal(a, ['militar'])}</td>
+                       <td className="p-3 font-medium">{getVal(a, ['dias']) || '-'} dias</td>
+                       <td className="p-3 text-slate-500">{formatDate(getVal(a, ['inicio', 'data']))}</td>
+                       <td className="p-3">{getVal(a, ['anexo']) ? <a href={getVal(a, ['anexo'])} target="_blank" className="text-blue-600"><Paperclip size={14}/></a> : '-'}</td>
+                       <td className="p-3">{getVal(a, ['status']) === 'Pendente' && role === 'admin' && <button onClick={() => handleHomologar(getVal(a, ['id']), 'atestado')} className="text-blue-600 font-bold text-xs hover:underline">Homologar</button>}</td>
                      </tr>
                    ))}
                  </tbody>
                </table></div>
           </div>
         );
-      case 'permutas':
-         return (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fadeIn">
-               <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 uppercase text-slate-500"><tr><th className="p-3">Status</th><th className="p-3">Solicitante</th><th className="p-3">Substituto</th><th className="p-3">Datas</th><th className="p-3">Anexo</th><th className="p-3">Ação</th></tr></thead>
-                   <tbody className="divide-y divide-slate-50">
-                     {permutas.map((p, idx) => (
-                       <tr key={idx} className={p.status === 'Pendente' ? 'bg-indigo-50/50' : ''}>
-                         <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${p.status === 'Pendente' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{p.status}</span></td>
-                         <td className="p-3 font-medium text-red-700">{p.solicitante}</td>
-                         <td className="p-3 font-medium text-green-700">{p.substituto || '---'}</td>
-                         <td className="p-3 text-slate-500"><div className="flex flex-col text-xs"><span className="text-red-500">S: {formatDate(p.datasai)}</span><span className="text-green-600">E: {formatDate(p.dataentra)}</span></div></td>
-                         <td className="p-3">{p.anexo && p.anexo.startsWith('http') ? <a href={p.anexo} target="_blank" className="text-blue-600 hover:underline"><Paperclip size={14}/></a> : '-'}</td>
-                         <td className="p-3">{p.status === 'Pendente' && role === 'admin' && <button onClick={() => handleHomologar(p.id, 'permuta')} className="text-blue-600 font-bold text-xs hover:underline">Homologar</button>}</td>
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table></div>
-            </div>
-         );
       case 'efetivo':
          return (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fadeIn">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Efetivo de Oficiais ({officers.length})</h3>
-                <div className="flex gap-4 text-xs font-medium">
-                  <div className="flex items-center gap-1 text-red-600"><AlertCircle size={12}/> Critério de Saída (Idade ≥ 45 ou Serviço ≥ 7)</div>
-                </div>
+                <h3 className="font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Efetivo de Oficiais ({globalOfficers.length})</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 uppercase text-slate-500 text-[10px]">
-                    <tr>
-                      <th className="p-3">Posto/Nome</th>
-                      <th className="p-3">Setor</th>
-                      <th className="p-3 text-center">Nasc.</th>
-                      <th className="p-3 text-center">Idade</th>
-                      <th className="p-3 text-center">Ingresso</th>
-                      <th className="p-3 text-center">Serviço</th>
-                    </tr>
+                    <tr><th className="p-3">Posto/Nome</th><th className="p-3">Setor</th><th className="p-3 text-center">Nasc.</th><th className="p-3 text-center">Idade</th><th className="p-3 text-center">Ingresso</th><th className="p-3 text-center">Serviço</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {officers.map((o, idx) => {
-                      const idade = calculateYears(o.nascimento);
-                      const servico = calculateYears(o.ingresso);
+                    {globalOfficers.map((o, idx) => {
+                      const nascCimbra = getVal(o, ['nasc']);
+                      const ingrCimbra = getVal(o, ['ingres']);
+                      const idade = calculateYears(nascCimbra);
+                      const servico = calculateYears(ingrCimbra);
                       const alertaIdade = idade >= 45;
                       const alertaServico = servico >= 7;
 
                       return (
-                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-slate-700">{o.patente} {o.nome}</span>
-                            <span className="text-[10px] text-slate-400">{o.quadro || 'Oficiais'}</span>
-                          </div>
-                        </td>
-                        <td className="p-3"><span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold uppercase">{o.setor}</span></td>
-                        <td className="p-3 text-center text-slate-500 font-mono text-xs">{formatDate(o.nascimento)}</td>
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="p-3"><div className="flex flex-col"><span className="font-bold text-slate-700">{getVal(o, ['posto', 'patente'])} {getVal(o, ['nome'])}</span></div></td>
+                        <td className="p-3"><span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold uppercase">{getVal(o, ['setor'])}</span></td>
+                        <td className="p-3 text-center text-slate-500 font-mono text-xs">{formatDate(nascCimbra)}</td>
                         <td className={`p-3 text-center font-bold ${alertaIdade ? 'text-red-600 bg-red-50' : 'text-slate-600'}`}>{idade} anos</td>
-                        <td className="p-3 text-center text-slate-500 font-mono text-xs">{formatDate(o.ingresso)}</td>
+                        <td className="p-3 text-center text-slate-500 font-mono text-xs">{formatDate(ingrCimbra)}</td>
                         <td className={`p-3 text-center font-bold ${alertaServico ? 'text-red-600 bg-red-50' : 'text-slate-600'}`}>{servico} anos</td>
                       </tr>
                     )})}
@@ -322,7 +394,7 @@ const MainSystem = ({ user, role, onLogout }) => {
               </div>
             </div>
          );
-      default: return <div>Carregando...</div>;
+      default: return <div className="p-10 text-center text-slate-400">Em desenvolvimento...</div>;
     }
   };
 
@@ -330,10 +402,10 @@ const MainSystem = ({ user, role, onLogout }) => {
     <div className="flex h-screen bg-slate-100 text-slate-800 font-sans overflow-hidden">
       <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-slate-900 text-white transition-all flex flex-col z-20 shadow-xl`}>
          <div className="p-4 border-b border-slate-800 flex items-center gap-3 h-16">{sidebarOpen && <span className="font-bold text-lg">SGA-Enf HACO</span>}<button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto text-slate-400"><Menu size={20}/></button></div>
-         <div className={`p-4 border-b border-slate-800 bg-slate-800/50 ${!sidebarOpen && 'flex justify-center'}`}><div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-lg border-2 border-slate-700 ${role === 'admin' ? 'bg-blue-600' : role === 'rt' ? 'bg-purple-600' : 'bg-slate-600'}`}>{user.substring(0,2).toUpperCase()}</div>{sidebarOpen && (<div><p className="font-bold text-sm truncate w-32">{user}</p><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{role === 'admin' ? 'Administrador' : role === 'rt' ? 'Resp. Técnico' : 'Usuário'}</p></div>)}</div></div>
-         <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-            {[ { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard }, { id: 'agenda', label: 'Minha Agenda', icon: BookOpen }, { id: 'atestados', label: 'Atestados', icon: ShieldAlert, badge: (role === 'admin' || role === 'rt') ? pendingAtestados : 0 }, { id: 'permutas', label: 'Permutas', icon: ArrowRightLeft, badge: (role === 'admin' || role === 'rt') ? pendingPermutas : 0 }, { id: 'efetivo', label: 'Efetivo', icon: Users } ].map(item => (
-              <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group relative ${activeTab === item.id ? 'bg-blue-600 shadow-md text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
+         <div className="p-4 border-b border-slate-800 bg-slate-800/50"><div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-lg bg-blue-600`}>{user.substring(0,2).toUpperCase()}</div>{sidebarOpen && (<div><p className="font-bold text-sm truncate w-32">{user}</p><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{role === 'admin' ? 'Administrador' : 'Usuário'}</p></div>)}</div></div>
+         <nav className="flex-1 py-4 px-2 space-y-1">
+            {[ { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard }, { id: 'agenda', label: 'Minha Agenda', icon: BookOpen }, { id: 'atestados', label: 'Atestados', icon: ShieldAlert, badge: pendingAtestados }, { id: 'permutas', label: 'Permutas', icon: ArrowRightLeft, badge: pendingPermutas }, { id: 'efetivo', label: 'Efetivo', icon: Users } ].map(item => (
+              <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${activeTab === item.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
                  <div className="relative"><item.icon size={20}/>{item.badge > 0 && <span className="absolute -top-2 -right-2 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border-2 border-slate-900">{item.badge}</span>}</div>{sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
               </button>
             ))}
@@ -346,10 +418,8 @@ const MainSystem = ({ user, role, onLogout }) => {
          {showAtestadoModal && (
            <Modal title="Novo Atestado" onClose={() => setShowAtestadoModal(false)}>
               <form onSubmit={submitAtestado} className="space-y-4">
-                 <div><label className="block text-xs font-bold text-slate-500">Militar</label><input type="text" value={user} disabled className="w-full p-2 bg-slate-100 rounded border border-slate-300 text-slate-500" /></div>
-                 <div><label className="block text-xs font-bold text-slate-500">Data de Início</label><input type="date" required className="w-full p-2 rounded border border-slate-300" value={formAtestado.inicio} onChange={e => setFormAtestado({...formAtestado, inicio: e.target.value})}/></div>
-                 <div><label className="block text-xs font-bold text-slate-500">Qtd Dias</label><input type="number" required className="w-full p-2 rounded border border-slate-300" value={formAtestado.dias} onChange={e => setFormAtestado({...formAtestado, dias: e.target.value})}/></div>
-                 <div><label className="block text-xs font-bold text-slate-500">CID (Opcional)</label><input type="text" className="w-full p-2 rounded border border-slate-300" value={formAtestado.cid} onChange={e => setFormAtestado({...formAtestado, cid: e.target.value})}/></div>
+                 <div><label className="block text-xs font-bold text-slate-500">Data Início</label><input type="date" required className="w-full p-2 rounded border" value={formAtestado.inicio} onChange={e => setFormAtestado({...formAtestado, inicio: e.target.value})}/></div>
+                 <div><label className="block text-xs font-bold text-slate-500">Dias</label><input type="number" required className="w-full p-2 rounded border" value={formAtestado.dias} onChange={e => setFormAtestado({...formAtestado, dias: e.target.value})}/></div>
                  <FileUpload onFileSelect={setFileData} />
                  <button type="submit" disabled={isSaving} className="w-full bg-red-600 text-white font-bold py-3 rounded hover:bg-red-700 flex justify-center gap-2">{isSaving ? <Loader2 className="animate-spin" /> : <Send size={18}/>} {isSaving ? "Enviando..." : "Enviar"}</button>
               </form>
@@ -358,10 +428,9 @@ const MainSystem = ({ user, role, onLogout }) => {
          {showPermutaModal && (
            <Modal title="Nova Permuta" onClose={() => setShowPermutaModal(false)}>
               <form onSubmit={submitPermuta} className="space-y-4">
-                 <div><label className="block text-xs font-bold text-slate-500">Solicitante (Sai)</label><input type="text" value={user} disabled className="w-full p-2 bg-slate-100 rounded border border-slate-300 text-slate-500" /></div>
-                 <div><label className="block text-xs font-bold text-slate-500">Data da Saída</label><input type="date" required className="w-full p-2 rounded border border-slate-300" value={formPermuta.dataSai} onChange={e => setFormPermuta({...formPermuta, dataSai: e.target.value})}/></div>
-                 <div className="border-t pt-4 mt-4"><label className="block text-xs font-bold text-slate-500">Substituto (Entra)</label><select className="w-full p-2 rounded border border-slate-300 bg-white" required value={formPermuta.substituto} onChange={e => setFormPermuta({...formPermuta, substituto: e.target.value})}><option value="">Selecione...</option>{officers.map((o,idx) => <option key={idx} value={o.nome}>{o.patente} {o.nome}</option>)}</select></div>
-                 <div><label className="block text-xs font-bold text-slate-500">Data da Entrada</label><input type="date" required className="w-full p-2 rounded border border-slate-300" value={formPermuta.dataEntra} onChange={e => setFormPermuta({...formPermuta, dataEntra: e.target.value})}/></div>
+                 <div><label className="block text-xs font-bold text-slate-500">Saída</label><input type="date" required className="w-full p-2 rounded border" value={formPermuta.dataSai} onChange={e => setFormPermuta({...formPermuta, dataSai: e.target.value})}/></div>
+                 <div className="border-t pt-4 mt-4"><label className="block text-xs font-bold text-slate-500">Substituto (Entra)</label><select className="w-full p-2 rounded border bg-white" required value={formPermuta.substituto} onChange={e => setFormPermuta({...formPermuta, substituto: e.target.value})}><option value="">Selecione...</option>{globalOfficers.map((o,idx) => <option key={idx} value={getVal(o, ['nome'])}>{getVal(o, ['posto'])} {getVal(o, ['nome'])}</option>)}</select></div>
+                 <div><label className="block text-xs font-bold text-slate-500">Data da Entrada</label><input type="date" required className="w-full p-2 rounded border" value={formPermuta.dataEntra} onChange={e => setFormPermuta({...formPermuta, dataEntra: e.target.value})}/></div>
                  <FileUpload onFileSelect={setFileData} />
                  <button type="submit" disabled={isSaving} className="w-full bg-indigo-600 text-white font-bold py-3 rounded hover:bg-indigo-700 flex justify-center gap-2">{isSaving ? <Loader2 className="animate-spin" /> : <Send size={18}/>} {isSaving ? "Enviando..." : "Solicitar"}</button>
               </form>
@@ -389,9 +458,9 @@ const UserDashboard = ({ user, onLogout }) => {
     try {
       const res = await fetch(`${API_URL_GESTAO}?action=getData`);
       if (res.ok) {
-        const data = JSON.parse(await res.text());
-        if (data.atestados) setMyAtestados(data.atestados.filter(a => a.militar && a.militar.includes(user)).reverse());
-        if (data.permutas) setMyPermutas(data.permutas.filter(p => p.solicitante && p.solicitante.includes(user)).reverse());
+        const data = await res.json();
+        if (data.atestados) setMyAtestados(data.atestados.filter(a => getVal(a, ['militar']) && getVal(a, ['militar']).includes(user)).reverse());
+        if (data.permutas) setMyPermutas(data.permutas.filter(p => getVal(p, ['solicitante']) && getVal(p, ['solicitante']).includes(user)).reverse());
         if (data.officers) setOfficers(data.officers);
       }
     } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -419,10 +488,10 @@ const UserDashboard = ({ user, onLogout }) => {
           <div className="mt-8"><h3 className="font-bold text-slate-800 text-lg mb-4 flex items-center justify-between">Meus Registros <button onClick={fetchHistory} className="text-blue-600 text-xs hover:underline"><RefreshCw size={12}/> Atualizar</button></h3>
              <div className="space-y-4">
                 {myPermutas.slice(0,3).map((p, i) => (
-                  <div key={i} className="bg-white p-3 rounded-lg border flex justify-between items-center shadow-sm"><div className="text-xs"><strong>Troca com {p.substituto}</strong><br/><span className="text-red-500">S: {formatDate(p.datasai)}</span> <span className="text-green-600">E: {formatDate(p.dataentra)}</span></div><span className={`text-[10px] px-2 py-1 rounded font-bold ${p.status === 'Homologado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{p.status}</span></div>
+                  <div key={i} className="bg-white p-3 rounded-lg border flex justify-between items-center shadow-sm"><div className="text-xs"><strong>Troca com {getVal(p, ['substituto'])}</strong><br/><span className="text-red-500">S: {formatDate(getVal(p, ['sai']))}</span> <span className="text-green-600">E: {formatDate(getVal(p, ['entra']))}</span></div><span className={`text-[10px] px-2 py-1 rounded font-bold ${getVal(p, ['status']) === 'Homologado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{getVal(p, ['status'])}</span></div>
                 ))}
                 {myAtestados.slice(0,3).map((a, i) => (
-                  <div key={i} className="bg-white p-3 rounded-lg border flex justify-between items-center shadow-sm"><div className="text-xs"><strong>{a.dias || '-'} Dias</strong><br/>Início: {formatDate(a.inicio || a.data)}</div><span className={`text-[10px] px-2 py-1 rounded font-bold ${a.status === 'Homologado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{a.status}</span></div>
+                  <div key={i} className="bg-white p-3 rounded-lg border flex justify-between items-center shadow-sm"><div className="text-xs"><strong>{getVal(a, ['dias']) || '-'} Dias</strong><br/>Início: {formatDate(getVal(a, ['inicio', 'data']))}</div><span className={`text-[10px] px-2 py-1 rounded font-bold ${getVal(a, ['status']) === 'Homologado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{getVal(a, ['status'])}</span></div>
                 ))}
                 {!loading && myAtestados.length === 0 && myPermutas.length === 0 && <div className="text-center py-10 text-slate-400 text-sm border border-dashed rounded-lg">Nenhum registro encontrado.</div>}
              </div>
@@ -441,7 +510,7 @@ const UserDashboard = ({ user, onLogout }) => {
          <Modal title="Nova Permuta" onClose={() => setShowPermutaModal(false)}>
             <form onSubmit={(e) => { e.preventDefault(); sendData('savePermuta', { id: Date.now(), status: 'Pendente', solicitante: user, substituto: formPermuta.substituto, datasai: formPermuta.dataSai, dataentra: formPermuta.dataEntra, file: fileData }); setShowPermutaModal(false); }} className="space-y-4">
                <div><label className="block text-xs font-bold">Saída</label><input type="date" required className="w-full p-2 border rounded" onChange={e => setFormPermuta({...formPermuta, dataSai: e.target.value})}/></div>
-               <div><label className="block text-xs font-bold">Substituto</label><select className="w-full p-2 border rounded bg-white" required onChange={e => setFormPermuta({...formPermuta, substituto: e.target.value})}><option value="">Selecione...</option>{officers.map((o,idx) => <option key={idx} value={o.nome}>{o.patente} {o.nome}</option>)}</select></div>
+               <div><label className="block text-xs font-bold">Substituto</label><select className="w-full p-2 border rounded bg-white" required onChange={e => setFormPermuta({...formPermuta, substituto: e.target.value})}><option value="">Selecione...</option>{officers.map((o,idx) => <option key={idx} value={getVal(o, ['nome'])}>{getVal(o, ['posto'])} {getVal(o, ['nome'])}</option>)}</select></div>
                <div><label className="block text-xs font-bold">Entrada</label><input type="date" required className="w-full p-2 border rounded" onChange={e => setFormPermuta({...formPermuta, dataEntra: e.target.value})}/></div>
                <FileUpload onFileSelect={setFileData} /><button type="submit" disabled={isSaving} className="w-full bg-indigo-600 text-white font-bold py-3 rounded shadow-lg">{isSaving ? "Enviando..." : "Solicitar"}</button>
             </form>
@@ -454,9 +523,37 @@ const UserDashboard = ({ user, onLogout }) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
+  const [officers, setOfficers] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchOfficers = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_URL_GESTAO}?action=getData`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.officers) setOfficers(data.officers);
+      }
+    } catch (e) { console.error("Erro login list", e); }
+    finally { setIsLoading(false); }
+  };
+
+  useEffect(() => { fetchOfficers(); }, []);
+
   const handleLogin = (u, r) => { setUser(u); setRole(r); };
   const handleLogout = () => { setUser(null); setRole(null); };
-  if (!user) return <LoginScreen onLogin={handleLogin} />;
-  if (role === 'admin' || role === 'rt') return <MainSystem user={user} role={role} onLogout={handleLogout} />;
+
+  if (!user) return <LoginScreen onLogin={handleLogin} officersList={officers} isLoading={isLoading} />;
+  
+  if (role === 'admin' || role === 'rt') {
+    return <MainSystem 
+      user={user} 
+      role={role} 
+      onLogout={handleLogout} 
+      globalOfficers={officers} 
+      refreshGlobal={fetchOfficers}
+    />;
+  }
+  
   return <UserDashboard user={user} onLogout={handleLogout} />;
 }
